@@ -24,6 +24,8 @@ from google.auth.transport import requests as google_requests
 from werkzeug.security import generate_password_hash, check_password_hash
 import structlog
 import psutil
+from flask_wtf.csrf import CSRFProtect, CSRFError
+from app_extensions import register_extensions
 
 # Load environment variables
 load_dotenv()
@@ -132,6 +134,9 @@ def create_app():
 
 # Create app instance
 app = create_app()
+@app.context_processor
+def inject_csrf_token():
+    return dict(csrf_token=csrf.generate_csrf)
 
 # Initialize extensions
 db.init_app(app)
