@@ -1,0 +1,709 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <script src="https://accounts.google.com/gsi/client" async></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Askara AI - 1 Video Panjang, 10+ Klip Viral, 1 Klik</title>
+    
+    <meta name="description" content="Askara AI adalah AI generatif yang mengubah video panjang menjadi klip-klip pendek viral. Hemat waktu editing hingga 90% dengan AI Viral Finder dan Speaker Tracking otomatis.">
+    <meta name="keywords" content="AI video clipper, video editing AI, YouTube clipper, viral clips, Opus Clip alternative, Gemini AI video, content repurposing">
+    <meta name="author" content="Askara AI">
+    <meta name="robots" content="index, follow">
+    <link rel="canonical" href="https://askaraai.com/">
+    
+    <meta property="og:title" content="Askara AI - 1 Video Panjang, 10+ Klip Viral, 1 Klik">
+    <meta property="og:description" content="AI generatif yang mengubah video panjang menjadi klip-klip pendek viral. Hemat waktu editing hingga 90%.">
+    <meta property="og:image" content="https://askaraai.com/static/og-image.jpg">
+    <meta property="og:url" content="https://askaraai.com/">
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="Askara AI">
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+
+    <style>
+        /* STYLING ASLI TIDAK DIUBAH SAMA SEKALI */
+        body { font-family: 'Inter', sans-serif; background-color: #0A0A0A; color: #E0E0E0; scroll-behavior: smooth; }
+        .hero-gradient { background: radial-gradient(ellipse 80% 50% at 50% -20%, rgba(79, 70, 229, 0.2), rgba(10, 10, 10, 0)); }
+        .spinner { border-color: #4f46e5; border-top-color: transparent; animation: spin 1s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .aspect-9-16 { position: relative; width: 100%; padding-bottom: 177.78%; background-color: #111111; border-radius: 0.75rem; overflow: hidden; border: 1px solid #27272a; }
+        .aspect-9-16 video { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; }
+        .top-recommendation-glow { box-shadow: 0 0 20px rgba(79, 70, 229, 0.6), 0 0 8px rgba(79, 70, 229, 0.9); }
+        .modal-backdrop { animation: fadeIn 0.3s ease-out; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        .feature-card { background: linear-gradient(180deg, #111111, #0A0A0A); }
+        .pricing-card-popular { border-color: #4f46e5; transform: scale(1.05); }
+        details summary::-webkit-details-marker { display: none; }
+        .details-arrow { transition: transform 0.2s; }
+        details[open] .details-arrow { transform: rotate(180deg); }
+        
+        /* Hanya menambahkan styling untuk modal tanpa mengubah UI utama */
+        .auth-tab.active { background-color: #fff; color: #1f2937; box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1); }
+        .auth-tab:not(.active) { color: #6b7280; }
+        .slide-up { animation: slideUp 0.3s ease-out; }
+        @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+    </style>
+</head>
+<body class="antialiased">
+
+    <header class="bg-black/50 backdrop-blur-xl sticky top-0 z-50 border-b border-gray-800">
+        <div class="container mx-auto px-4 sm:px-6 py-4 flex justify-between items-center">
+            <a href="#" class="text-2xl font-bold text-white">
+                <svg viewBox="0 0 120 32" fill="none" xmlns="http://www.w3.org/2000/svg" class="h-8 w-auto">
+                    <path d="M18.4 31.4L0 0H8.8L22.6 24.8L18.4 31.4Z" fill="#6366F1"/>
+                    <text x="0" y="24" font-family="Inter, sans-serif" font-size="24" font-weight="bold" fill="white">Askara</text>
+                    <text x="80" y="24" font-family="Inter, sans-serif" font-size="24" font-weight="bold" fill="#A5B4FC">AI</text>
+                </svg>
+            </a>
+            <nav class="hidden md:flex items-center space-x-8 text-gray-300">
+                <a href="#fitur" class="hover:text-white transition-colors">Fitur</a>
+                <a href="#harga" class="hover:text-white transition-colors">Harga</a>
+                <a href="#testimoni" class="hover:text-white transition-colors">Testimoni</a>
+                <a href="#faq" class="hover:text-white transition-colors">FAQ</a>
+            </nav>
+            <div id="user-auth-section" class="flex items-center space-x-2 sm:space-x-4"></div>
+        </div>
+    </header>
+
+    <main>
+        <section class="hero-gradient pt-20 pb-24">
+            <div class="container mx-auto px-6 text-center">
+                <h1 class="text-4xl md:text-6xl font-black text-white leading-tight mt-4">1 Video Panjang, 10+ Klip Viral, 1 Klik.</h1>
+                <p class="text-lg md:text-xl text-gray-400 max-w-3xl mx-auto mt-6">Askara AI adalah AI generatif yang mengubah video panjang Anda menjadi klip-klip pendek yang siap dibagikan, menghemat waktu editing Anda hingga 90%.</p>
+                <div id="autoclip" class="mt-10 max-w-2xl mx-auto">
+                    <div id="input-form">
+                        <div class="flex flex-col sm:flex-row gap-2 bg-gray-900/50 border border-gray-700 rounded-lg p-2">
+                            <input id="video-url" type="url" placeholder="Tempelkan link YouTube di sini" class="flex-grow px-5 py-4 bg-transparent focus:outline-none text-white placeholder-gray-500">
+                            <button id="generate-button" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-8 py-4 rounded-md transition-all transform hover:scale-105 whitespace-nowrap">Dapatkan Klip Gratis</button>
+                        </div>
+                        <p id="error-message" class="text-red-400 text-center mt-4 hidden"></p>
+                    </div>
+                </div>
+                 <div class="mt-8 text-center"><p class="text-sm text-gray-500">Dipercaya oleh 10,000+ kreator, marketer, dan agensi</p></div>
+            </div>
+        </section>
+
+        <section id="results-area" class="py-20 hidden">
+            <div class="container mx-auto px-6">
+                <div id="processing-state" class="hidden text-center py-12">
+                    <div class="flex justify-center items-center mb-4"><div class="spinner w-12 h-12 rounded-full border-4"></div></div>
+                    <h3 id="processing-status" class="text-2xl font-semibold text-white">Memulai proses...</h3>
+                    <p class="text-gray-400">Harap tunggu, AI kami sedang bekerja.</p>
+                </div>
+                <div id="results-section" class="hidden">
+                    <div class="text-center mb-12"><h2 class="text-3xl md:text-4xl font-bold text-white">Pusat Konten Anda Telah Siap!</h2><p class="text-gray-400 mt-3">Satu video telah diubah menjadi berbagai format konten oleh AI.</p></div>
+                    <div class="mb-8 border-b border-slate-800 flex justify-center flex-wrap">
+                        <button data-tab="clips" class="tab-btn px-4 sm:px-6 py-3 text-base sm:text-lg font-semibold border-b-2 border-indigo-500 text-white">Video Klip</button>
+                        <button data-tab="blog" class="tab-btn px-4 sm:px-6 py-3 text-base sm:text-lg font-semibold border-b-2 border-transparent text-gray-400 hover:text-white">Artikel Blog</button>
+                        <button data-tab="social" class="tab-btn px-4 sm:px-6 py-3 text-base sm:text-lg font-semibold border-b-2 border-transparent text-gray-400 hover:text-white">Postingan Sosial</button>
+                    </div>
+                    <div id="tab-content">
+                        <div id="clips-content" class="tab-pane"><div id="clips-container" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6"></div></div>
+                        <div id="blog-content" class="tab-pane hidden"><div class="max-w-4xl mx-auto bg-slate-900 p-6 sm:p-8 rounded-lg border border-slate-800"><div id="blog-article-container" class="prose prose-invert max-w-none text-slate-300"></div><button id="copy-blog-btn" class="mt-6 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-4 rounded-lg flex items-center gap-2"><i data-lucide="copy"></i>Salin Artikel</button></div></div>
+                        <div id="social-content" class="tab-pane hidden"><div id="social-posts-container" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"></div></div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section id="fitur" class="py-20 bg-black/20">
+            <div class="container mx-auto px-6">
+                <div class="text-center mb-16">
+                    <h2 class="text-3xl md:text-4xl font-bold text-white">Bukan Sekadar Pemotong Video.</h2>
+                    <p class="text-lg text-gray-400 mt-4 max-w-2xl mx-auto">Askara AI adalah asisten konten cerdas yang melakukan semua pekerjaan berat untuk Anda.</p>
+                </div>
+                <div class="space-y-16">
+                    <div class="grid md:grid-cols-2 gap-8 items-center">
+                        <div class="order-2 md:order-1">
+                            <span class="text-indigo-400 font-semibold">AI Viral Finder™</span>
+                            <h3 class="text-3xl font-bold text-white mt-2">Menemukan Momen Emas Secara Otomatis</h3>
+                            <p class="text-gray-400 mt-4">AI kami menganalisis video Anda untuk mengidentifikasi topik paling menarik dan momen yang berpotensi viral, lalu memberi peringkat pada setiap klip agar Anda tahu mana yang harus diposting lebih dulu.</p>
+                        </div>
+                        <div class="order-1 md:order-2 bg-slate-900 p-4 rounded-lg border border-slate-800">
+                            <img src="https://images.unsplash.com/photo-1551288049-bebda4e38f71?q=80&w=1200&auto=format&fit=crop" onerror="this.onerror=null;this.src='https://placehold.co/600x400/1e293b/4f46e5?text=Analitik+Viral';" alt="Visualisasi Skor Viral" class="rounded-md aspect-video object-cover">
+                        </div>
+                    </div>
+                    <div class="grid md:grid-cols-2 gap-8 items-center">
+                        <div>
+                            <div class="bg-slate-900 p-4 rounded-lg border border-slate-800">
+                                <img src="https://images.unsplash.com/photo-1521119989659-a83eee488004?q=80&w=1200&auto=format&fit=crop" onerror="this.onerror=null;this.src='https://placehold.co/600x400/1e293b/4f46e5?text=Fokus+AI';" alt="Visualisasi Speaker Tracking" class="rounded-md aspect-video object-cover">
+                            </div>
+                        </div>
+                        <div>
+                            <span class="text-indigo-400 font-semibold">AI Speaker Tracking</span>
+                            <h3 class="text-3xl font-bold text-white mt-2">Fokus Otomatis pada Pembicara</h3>
+                            <p class="text-gray-400 mt-4">Tidak perlu lagi framing manual. AI kami mendeteksi siapa yang berbicara dan secara otomatis menjaga mereka tetap di tengah frame, menciptakan klip yang dinamis dan terlihat profesional.</p>
+                        </div>
+                    </div>
+                    <div class="grid md:grid-cols-2 gap-8 items-center">
+                        <div class="order-2 md:order-1">
+                            <span class="text-indigo-400 font-semibold">Content Repurposing Hub</span>
+                            <h3 class="text-3xl font-bold text-white mt-2">Satu Video, Berbagai Format Konten</h3>
+                            <p class="text-gray-400 mt-4">Ubah satu video menjadi berbagai aset marketing. Dapatkan klip video 9:16, artikel blog SEO-friendly, dan ide postingan carousel untuk media sosial—semuanya dihasilkan secara otomatis oleh AI.</p>
+                        </div>
+                        <div class="order-1 md:order-2 bg-slate-900 p-4 rounded-lg border border-slate-800">
+                            <img src="https://images.unsplash.com/photo-1581091226825-a6a2a5aee158?q=80&w=1200&auto=format&fit=crop" onerror="this.onerror=null;this.src='https://placehold.co/600x400/1e293b/4f46e5?text=Daur+Ulang+Konten';" alt="Visualisasi Daur Ulang Konten" class="rounded-md aspect-video object-cover">
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="py-20">
+            <div class="container mx-auto px-6 text-center">
+                <h2 class="text-3xl md:text-4xl font-bold text-white">Siap Mengubah Konten Anda?</h2>
+                <p class="text-lg text-gray-400 mt-4 max-w-xl mx-auto">Berhenti membuang waktu untuk pekerjaan manual. Biarkan AI kami bekerja untuk Anda.</p>
+                <div class="mt-8">
+                    <a href="#autoclip" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-8 py-4 rounded-lg transition-all transform hover:scale-105 text-lg">Mulai Gratis Sekarang</a>
+                </div>
+            </div>
+        </section>
+
+        <section id="testimoni" class="py-20 bg-black/20">
+             <div class="container mx-auto px-6">
+                <div class="text-center mb-16">
+                    <h2 class="text-3xl md:text-4xl font-bold text-white">Apa Kata Para Kreator?</h2>
+                </div>
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                    <div class="bg-slate-900 p-8 rounded-2xl border border-slate-800">
+                        <p class="text-slate-300">"Askara AI mengubah cara saya membuat konten. Dari satu podcast, saya bisa dapat 20 klip untuk seminggu. Benar-benar hemat waktu!"</p>
+                        <div class="flex items-center mt-6">
+                            <img src="https://placehold.co/48x48/4f46e5/ffffff?text=A" alt="Avatar" class="w-12 h-12 rounded-full">
+                            <div class="ml-4"><p class="font-bold text-white">Andi - Podcaster</p></div>
+                        </div>
+                    </div>
+                    <div class="bg-slate-900 p-8 rounded-2xl border border-slate-800">
+                        <p class="text-slate-300">"Sebagai social media manager, Askara AI adalah senjata rahasia saya. Klien sangat puas dengan kuantitas dan kualitas konten yang kami hasilkan."</p>
+                        <div class="flex items-center mt-6">
+                            <img src="https://placehold.co/48x48/ec4899/ffffff?text=B" alt="Avatar" class="w-12 h-12 rounded-full">
+                            <div class="ml-4"><p class="font-bold text-white">Bella - Digital Marketer</p></div>
+                        </div>
+                    </div>
+                    <div class="bg-slate-900 p-8 rounded-2xl border border-slate-800">
+                        <p class="text-slate-300">"Dulu saya butuh editor untuk memotong klip streaming game saya. Sekarang, saya bisa melakukannya sendiri dalam 15 menit. Gila!"</p>
+                        <div class="flex items-center mt-6">
+                            <img src="https://placehold.co/48x48/84cc16/ffffff?text=C" alt="Avatar" class="w-12 h-12 rounded-full">
+                            <div class="ml-4"><p class="font-bold text-white">Charlie - Gaming Streamer</p></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section id="harga" class="py-20 bg-slate-950/50">
+            <div class="container mx-auto px-6">
+                <div class="text-center mb-16">
+                    <h2 class="text-3xl md:text-4xl font-bold text-white">Pilih Paket yang Tepat untuk Anda</h2>
+                    <p class="text-gray-400 mt-3">Mulai gratis, upgrade kapan saja. Tanpa kontrak.</p>
+                </div>
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-8 max-w-5xl mx-auto">
+                    <div class="border border-gray-800 bg-slate-900 p-8 rounded-2xl">
+                        <h3 class="text-xl font-bold text-white">Gratis</h3>
+                        <p class="text-gray-400 mt-2">Untuk mencoba fitur dasar.</p>
+                        <p class="text-4xl font-black text-white mt-6">$0<span class="text-base font-medium text-gray-400">/bulan</span></p>
+                        <a href="#autoclip" onclick="showSignupModal('signup')" class="pricing-btn w-full block text-center mt-6 bg-gray-700 hover:bg-gray-600 text-white font-semibold py-3 rounded-lg transition-colors">Mulai Gratis</a>
+                        <ul class="space-y-4 mt-8 text-gray-300">
+                            <li class="flex items-center"><i data-lucide="check" class="w-5 h-5 text-indigo-400 mr-3"></i>30 kredit gratis saat daftar</li>
+                            <li class="flex items-center"><i data-lucide="check" class="w-5 h-5 text-indigo-400 mr-3"></i>10 kredit per video</li>
+                            <li class="flex items-center"><i data-lucide="check" class="w-5 h-5 text-indigo-400 mr-3"></i>Fitur clipping dasar</li>
+                        </ul>
+                    </div>
+                    <div class="border-2 bg-slate-900 p-8 rounded-2xl pricing-card-popular relative">
+                        <span class="absolute top-0 -translate-y-1/2 left-1/2 -translate-x-1/2 bg-indigo-600 text-white text-xs font-bold px-3 py-1 rounded-full">PALING POPULER</span>
+                        <h3 class="text-xl font-bold text-white">Premium</h3>
+                        <p class="text-gray-400 mt-2">Untuk kreator profesional & agensi.</p>
+                        <div class="flex items-baseline justify-center mt-6">
+                            <p class="text-4xl font-black text-white">$12</p>
+                            <p class="text-2xl font-bold text-gray-500 line-through ml-3">$30</p>
+                            <span class="text-base font-medium text-gray-400 ml-1.5">/bulan</span>
+                        </div>
+                        <a href="#" onclick="showPremiumModal()" class="pricing-btn w-full block text-center mt-6 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 rounded-lg transition-colors">Pilih Paket Premium</a>
+                        <ul class="space-y-4 mt-8 text-gray-300">
+                            <li class="flex items-center"><i data-lucide="check" class="w-5 h-5 text-indigo-400 mr-3"></i>Kredit tak terbatas</li>
+                            <li class="flex items-center"><i data-lucide="check" class="w-5 h-5 text-indigo-400 mr-3"></i>Semua fitur AI canggih</li>
+                            <li class="flex items-center"><i data-lucide="check" class="w-5 h-5 text-indigo-400 mr-3"></i>Tanpa watermark</li>
+                            <li class="flex items-center"><i data-lucide="check" class="w-5 h-5 text-indigo-400 mr-3"></i>Dukungan prioritas</li>
+                        </ul>
+                    </div>
+                    <div class="border border-gray-800 bg-slate-900 p-8 rounded-2xl">
+                        <h3 class="text-xl font-bold text-white">Enterprise</h3>
+                        <p class="text-gray-400 mt-2">Untuk tim besar dengan kebutuhan khusus.</p>
+                        <p class="text-4xl font-black text-white mt-6">Kustom</p>
+                        <a href="mailto:official@askaraai.com?subject=Pertanyaan Paket Enterprise Askara AI" onclick="event.preventDefault(); showEnterpriseModal()" class="w-full block text-center mt-6 bg-gray-700 hover:bg-gray-600 text-white font-semibold py-3 rounded-lg transition-colors">Hubungi Kami</a>
+                        <ul class="space-y-4 mt-8 text-gray-300">
+                            <li class="flex items-center"><i data-lucide="check" class="w-5 h-5 text-indigo-400 mr-3"></i>Semua di paket Premium</li>
+                            <li class="flex items-center"><i data-lucide="check" class="w-5 h-5 text-indigo-400 mr-3"></i>Kolaborasi tim tak terbatas</li>
+                            <li class="flex items-center"><i data-lucide="check" class="w-5 h-5 text-indigo-400 mr-3"></i>Akses API</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section id="faq" class="py-20">
+            <div class="container mx-auto px-6 max-w-3xl">
+                <div class="text-center mb-12">
+                    <h2 class="text-3xl md:text-4xl font-bold text-white">Pertanyaan yang Sering Diajukan</h2>
+                </div>
+                <div class="space-y-4">
+                    <details class="bg-slate-900 p-6 rounded-lg border border-slate-800"><summary class="font-semibold text-lg text-white flex justify-between items-center cursor-pointer">Siapa yang cocok menggunakan Askara AI?<i data-lucide="chevron-down" class="w-5 h-5 text-gray-400 details-arrow"></i></summary><p class="text-gray-400 mt-4">Askara AI dirancang untuk siapa saja yang membuat konten video panjang, termasuk podcaster, streamer game, marketer, agensi digital, pembuat kursus online, dan tim komunikasi perusahaan.</p></details>
+                    <details class="bg-slate-900 p-6 rounded-lg border border-slate-800"><summary class="font-semibold text-lg text-white flex justify-between items-center cursor-pointer">Bagaimana dengan privasi video saya?<i data-lucide="chevron-down" class="w-5 h-5 text-gray-400 details-arrow"></i></summary><p class="text-gray-400 mt-4">Kami sangat serius menjaga privasi Anda. Video Anda dienkripsi saat transit dan saat disimpan. Hanya Anda yang memiliki akses ke konten Anda, dan kami tidak akan pernah membagikannya.</p></details>
+                    <details class="bg-slate-900 p-6 rounded-lg border border-slate-800"><summary class="font-semibold text-lg text-white flex justify-between items-center cursor-pointer">Bisakah saya membatalkan langganan kapan saja?<i data-lucide="chevron-down" class="w-5 h-5 text-gray-400 details-arrow"></i></summary><p class="text-gray-400 mt-4">Tentu saja. Anda bisa membatalkan langganan Anda kapan pun dari dashboard akun Anda. Tidak ada pertanyaan, tidak ada kerumitan. Anda akan tetap memiliki akses ke fitur berbayar hingga akhir siklus penagihan Anda.</p></details>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer class="bg-black border-t border-gray-800">
+        <div class="container mx-auto px-6 py-16">
+            <div class="grid grid-cols-1 md:grid-cols-6 gap-8">
+                <div class="md:col-span-2">
+                    <a href="#" class="text-2xl font-bold text-white">Askara AI<span class="text-indigo-500">.</span></a>
+                    <p class="text-gray-400 mt-4 max-w-xs">Ubah video panjang Anda menjadi klip viral dengan AI.</p>
+                    <a href="#" class="mt-6 inline-block">
+                        <img src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=402431&theme=dark" alt="Product Hunt" style="width: 250px; height: 54px;" width="250" height="54">
+                    </a>
+                </div>
+                <div>
+                    <h4 class="font-semibold text-white">Produk</h4>
+                    <ul class="space-y-3 mt-4 text-gray-400">
+                        <li><a href="#fitur" class="hover:text-white">Fitur</a></li>
+                        <li><a href="#harga" class="hover:text-white">Harga</a></li>
+                        <li><a href="#" class="hover:text-white">Afiliasi</a></li>
+                    </ul>
+                </div>
+                <div>
+                    <h4 class="font-semibold text-white">Sumber Daya</h4>
+                    <ul class="space-y-3 mt-4 text-gray-400">
+                        <li><a href="#" class="hover:text-white">Blog</a></li>
+                        <li><a href="#" class="hover:text-white">Komunitas</a></li>
+                        <li><a href="mailto:official@askaraai.com?subject=Pertanyaan Mengenai Askara AI" class="hover:text-white">Hubungi Kami</a></li>
+                    </ul>
+                </div>
+                <div>
+                    <h4 class="font-semibold text-white">Perusahaan</h4>
+                    <ul class="space-y-3 mt-4 text-gray-400">
+                        <li><a href="#" class="hover:text-white">Tentang Kami</a></li>
+                        <li><a href="#" class="hover:text-white">Karir</a></li>
+                    </ul>
+                </div>
+                <div>
+                    <h4 class="font-semibold text-white">Legal</h4>
+                    <ul class="space-y-3 mt-4 text-gray-400">
+                        <li><a href="#" class="hover:text-white">Kebijakan Privasi</a></li>
+                        <li><a href="#" class="hover:text-white">Syarat & Ketentuan</a></li>
+                    </ul>
+                </div>
+            </div>
+            <div class="mt-16 border-t border-gray-800 pt-8 flex flex-col sm:flex-row justify-between items-center">
+                <p class="text-gray-500 text-sm">Hak Cipta © 2025 Askara AI. Dibuat oleh Askara AI.</p>
+                <div class="flex space-x-4 mt-4 sm:mt-0">
+                    <a href="https://twitter.com/askara_ai" target="_blank" class="text-gray-500 hover:text-white"><i data-lucide="twitter"></i></a>
+                    <a href="https://www.instagram.com/askara_ai" target="_blank" class="text-gray-500 hover:text-white"><i data-lucide="instagram"></i></a>
+                    <a href="https://youtube.com/@askara_ai" target="_blank" class="text-gray-500 hover:text-white"><i data-lucide="youtube"></i></a>
+                    <a href="https://linkedin.com/company/askara-ai" target="_blank" class="text-gray-500 hover:text-white"><i data-lucide="linkedin"></i></a>
+                    <a href="https://tiktok.com/@askara_ai" target="_blank" class="text-gray-500 hover:text-white">
+                        <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                           <path d="M12.525.02c1.31-.02 2.61-.01 3.91-.02.08 1.53.63 3.09 1.75 4.17 1.12 1.11 2.7 1.62 4.24 1.79v4.03c-1.44-.05-2.89-.35-4.2-.97-.57-.26-1.1-.59-1.62-.93-.01 2.92.01 5.84-.02 8.75-.08 1.4-.54 2.79-1.35 3.94-1.31 1.92-3.58 3.17-5.91 3.21-2.43.03-4.85-.38-6.83-1.91-2.06-1.58-3.07-4.14-3.07-6.56 0-2.55 1.29-4.66 3.44-5.95 2.13-1.28 4.62-1.48 6.94-.78.03 1.5.02 3 .01 4.5.55-.29 1.08-.58 1.61-.87v-4.84c-1.53.08-3.05.39-4.48.96-1.07.41-2.11.9-3.07 1.54-.26.18-.52.36-.78.54-.02-1.88-.01-3.76.01-5.63.01-1.37.7-2.64 1.8-3.48 1.15-.88 2.66-1.29 4.19-1.28z"></path>
+                        </svg>
+                    </a>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Modal Auth -->
+    <div id="auth-modal" class="fixed inset-0 bg-gray-900 bg-opacity-80 backdrop-blur-sm overflow-y-auto h-full w-full z-50 hidden fade-in">
+        <div class="relative top-20 mx-auto p-5 border-2 w-full max-w-md shadow-lg rounded-2xl bg-gray-800 border-gray-700">
+            <div class="mt-3">
+                <div class="flex items-center justify-between mb-6">
+                    <h3 class="text-2xl font-bold text-white" id="auth-modal-title">Get Started</h3>
+                    <button onclick="closeAuthModal()" class="text-gray-400 hover:text-white transition-colors">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                    </button>
+                </div>
+                <div class="flex mb-6 bg-gray-900 rounded-lg p-1">
+                    <button onclick="showAuthTab('signup')" class="auth-tab flex-1 py-2 px-4 text-sm font-medium rounded-md transition-colors" id="signup-tab">Sign Up Free</button>
+                    <button onclick="showAuthTab('login')" class="auth-tab flex-1 py-2 px-4 text-sm font-medium rounded-md transition-colors" id="login-tab">Log In</button>
+                </div>
+
+                <div id="g_id_onload" data-context="signin" data-ux_mode="popup" data-callback="handleCredentialResponse" data-auto_prompt="false"></div>
+                <div class="g_id_signin" data-type="standard" data-shape="rectangular" data-theme="outline" data-text="continue_with" data-size="large" data-logo_alignment="left"></div>
+
+                <div class="relative my-4">
+                    <div class="absolute inset-0 flex items-center"><div class="w-full border-t border-gray-700"></div></div>
+                    <div class="relative flex justify-center text-sm"><span class="px-2 bg-gray-800 text-gray-500">or</span></div>
+                </div>
+
+                <form id="signup-form" class="auth-form space-y-4">
+                    <input type="text" name="name" required class="w-full px-3 py-2 bg-gray-700 border border-gray-600 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Full Name">
+                    <input type="email" name="email" required class="w-full px-3 py-2 bg-gray-700 border border-gray-600 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Email Address">
+                    <input type="password" name="password" required class="w-full px-3 py-2 bg-gray-700 border border-gray-600 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Password">
+                    <button type="submit" class="w-full bg-blue-600 text-white py-3 px-4 rounded-lg font-medium hover:bg-blue-700 transition-colors">Create Free Account</button>
+                </form>
+
+                <form id="login-form" class="auth-form space-y-4 hidden">
+                    <input type="email" name="email" required class="w-full px-3 py-2 bg-gray-700 border border-gray-600 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Email Address">
+                    <input type="password" name="password" required class="w-full px-3 py-2 bg-gray-700 border border-gray-600 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Password">
+                    <button type="submit" class="w-full bg-blue-600 text-white py-3 px-4 rounded-lg font-medium hover:bg-blue-700 transition-colors">Sign In</button>
+                </form>
+            </div>
+        </div>
+    </div>
+    
+    <div id="credits-modal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 modal-backdrop">
+        <div class="bg-slate-800 rounded-xl p-8 max-w-sm w-full border border-slate-700 text-center relative">
+            <button onclick="closeCreditsModal()" class="absolute top-4 right-4 text-gray-500 hover:text-white">×</button>
+            <h2 class="text-2xl font-bold text-white mb-2">Kredit Tidak Cukup</h2>
+            <p class="text-slate-400 mb-6">Anda memerlukan 10 kredit untuk memproses video. Upgrade ke Premium untuk akses tak terbatas!</p>
+            <a href="#harga" onclick="showPremiumModal()" class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-6 py-3 rounded-lg">Upgrade Sekarang</a>
+        </div>
+    </div>
+    
+    <div id="loading-overlay" class="fixed inset-0 bg-gray-900 bg-opacity-80 z-50 hidden fade-in">
+        <div class="flex items-center justify-center min-h-screen text-center">
+            <div>
+                <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-400 mx-auto mb-4"></div>
+                <p class="text-white" id="loading-message">Processing...</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // KODE JAVASCRIPT DIPERBAIKI TANPA MENGUBAH UI
+        let user = null;
+        let pendingUrl = null;
+        let googleClientId = null;
+        
+        const userAuthSection = document.getElementById('user-auth-section');
+        const generateButton = document.getElementById('generate-button');
+        const creditsModal = document.getElementById('credits-modal');
+        const videoUrlInput = document.getElementById('video-url');
+        const inputForm = document.getElementById('input-form');
+        const processingState = document.getElementById('processing-state');
+        const processingStatus = document.getElementById('processing-status');
+        const resultsSection = document.getElementById('results-section');
+        const clipsContainer = document.getElementById('clips-container');
+        const errorMessage = document.getElementById('error-message');
+
+        // Fetch Google Client ID dan setup
+        async function loadGoogleConfig() {
+            try {
+                const response = await fetch('/api/config/google-client-id');
+                if (response.ok) {
+                    const data = await response.json();
+                    googleClientId = data.client_id;
+                    
+                    // Setup Google Sign-In dengan client ID yang benar
+                    if (googleClientId && window.google) {
+                        const gIdOnload = document.querySelector('#g_id_onload');
+                        if (gIdOnload) {
+                            gIdOnload.setAttribute('data-client_id', googleClientId);
+                        }
+                    }
+                }
+            } catch (error) {
+                console.error('Failed to load Google config:', error);
+            }
+        }
+
+        function updateUI() {
+            if (user && user.email) {
+                userAuthSection.innerHTML = `
+                    <div class="flex items-center gap-2 text-sm bg-gray-800 px-3 py-1.5 rounded-full">
+                        <i data-lucide="gem" class="w-4 h-4 ${user.is_premium ? 'text-yellow-400' : 'text-indigo-400'}"></i>
+                        <span class="font-semibold text-white">${user.is_premium ? 'Premium' : user.credits + ' Kredit'}</span>
+                    </div>
+                    <button id="logout-btn" class="text-gray-300 hover:text-white font-medium text-sm sm:text-base">Logout</button>
+                `;
+                document.getElementById('logout-btn').addEventListener('click', handleLogout);
+            } else {
+                userAuthSection.innerHTML = `
+                    <a href="#" onclick="showSignupModal('login')" class="text-gray-300 hover:text-white font-medium text-sm sm:text-base">Masuk</a>
+                    <a href="#" onclick="showSignupModal('signup')" class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-4 py-2 sm:px-5 sm:py-2.5 rounded-lg text-sm sm:text-base">Daftar Gratis</a>
+                `;
+            }
+            lucide.createIcons();
+        }
+        
+        async function handleLogout() {
+            await fetch('/api/logout', { method: 'POST', credentials: 'include' });
+            user = null;
+            window.location.reload();
+        }
+
+        async function startProcessing(url) {
+            inputForm.classList.add('hidden');
+            document.getElementById('results-area').classList.remove('hidden');
+            processingState.classList.remove('hidden');
+            resultsSection.classList.add('hidden');
+            errorMessage.classList.add('hidden');
+            processingStatus.textContent = 'Mengirim permintaan ke server...';
+            document.getElementById('results-area').scrollIntoView({ behavior: 'smooth' });
+            
+            try {
+                const response = await fetch('/api/process-video', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify({ url: url }),
+                });
+                
+                if (!response.ok) {
+                    const errData = await response.json();
+                    if (response.status === 402) {
+                        processingState.classList.add('hidden');
+                        inputForm.classList.remove('hidden');
+                        creditsModal.classList.remove('hidden');
+                        return;
+                    }
+                    throw new Error(errData.error || 'Gagal memulai pemrosesan video.');
+                }
+                
+                const data = await response.json();
+                if (!data.task_id) throw new Error("Tidak menerima Task ID dari server.");
+                processingStatus.textContent = 'Permintaan diterima! AI sedang bekerja...';
+                pollTaskStatus(data.task_id);
+            } catch (error) {
+                processingState.classList.add('hidden');
+                errorMessage.textContent = `Terjadi kesalahan: ${error.message}`;
+                errorMessage.classList.remove('hidden');
+                inputForm.classList.remove('hidden');
+            }
+        }
+
+        function pollTaskStatus(taskId) {
+            let pollCount = 0;
+            const maxPolls = 120;
+            const interval = setInterval(async () => {
+                if (pollCount++ > maxPolls) {
+                    clearInterval(interval);
+                    processingState.classList.add('hidden');
+                    errorMessage.textContent = "Pemrosesan memakan waktu terlalu lama.";
+                    errorMessage.classList.remove('hidden');
+                    inputForm.classList.remove('hidden');
+                    return;
+                }
+                try {
+                    const response = await fetch(`/api/task-status/${taskId}`, { credentials: 'include' });
+                    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                    const data = await response.json();
+
+                    if (data.state === 'SUCCESS') {
+                        clearInterval(interval);
+                        processingState.classList.add('hidden');
+                        displayResults(data.result);
+                        checkSession();
+                    } else if (data.state === 'FAILURE') {
+                        clearInterval(interval);
+                        processingState.classList.add('hidden');
+                        errorMessage.textContent = `Error: ${data.status || 'Pemrosesan gagal'}`;
+                        errorMessage.classList.remove('hidden');
+                        inputForm.classList.remove('hidden');
+                    } else {
+                         processingStatus.textContent = {
+                            'PENDING': 'Menunggu antrian...',
+                            'PROGRESS': 'AI sedang memproses video...',
+                            'RETRY': 'Mencoba ulang...'
+                        }[data.state] || `Status: ${data.state}`;
+                    }
+                } catch (error) {
+                    if (pollCount > 5) {
+                        clearInterval(interval);
+                        errorMessage.textContent = "Koneksi terputus.";
+                        errorMessage.classList.remove('hidden');
+                        inputForm.classList.remove('hidden');
+                        processingState.classList.add('hidden');
+                    }
+                }
+            }, 5000);
+        }
+
+        function displayResults(data) {
+            resultsSection.classList.remove('hidden');
+            document.querySelector('#results-section h2').textContent = data.original_title || 'Pusat Konten Anda Telah Siap!';
+            clipsContainer.innerHTML = ''; 
+            if (data.clips && data.clips.length > 0) {
+                data.clips.sort((a, b) => (b.viralScore || 0) - (a.viralScore || 0));
+                data.clips.forEach((clip, index) => {
+                    const downloadFileName = `${(clip.title || 'askara_clip').replace(/[^a-zA-Z0-9_]/g, '_')}.mp4`;
+                    const recommendationBadge = index === 0 ? `<div class="absolute top-3 right-3 bg-yellow-400 text-yellow-900 text-xs font-bold px-2 py-1 rounded-full flex items-center gap-1 z-10"><i data-lucide="star" class="w-3 h-3"></i><span>Paling Viral</span></div>` : '';
+                    clipsContainer.innerHTML += `
+                        <div class="bg-slate-900 rounded-xl overflow-hidden border border-slate-800 flex flex-col relative ${index === 0 ? 'top-recommendation-glow' : ''}">
+                            ${recommendationBadge}
+                            <div class="aspect-9-16"><video src="/clips/${clip.filename}" controls loop playsinline muted></video></div>
+                            <div class="p-4 flex flex-col flex-grow">
+                                <h3 class="text-base font-bold text-white">${clip.title}</h3>
+                                <div class="text-xs text-slate-400 my-2">Durasi: ${Math.round(clip.duration)} detik</div>
+                                <div class="mt-auto pt-2">
+                                    <a href="/clips/${clip.filename}" download="${downloadFileName}" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 rounded-lg flex items-center justify-center text-sm"><i data-lucide="download" class="w-4 h-4 mr-2"></i> Unduh Klip</a>
+                                </div>
+                            </div>
+                        </div>`;
+                });
+            }
+            document.getElementById('blog-article-container').innerHTML = data.blog_article ? data.blog_article.replace(/\n/g, '<br>') : "<p>Artikel tidak tersedia.</p>";
+            const socialContainer = document.getElementById('social-posts-container');
+            socialContainer.innerHTML = '';
+            if(data.carousel_posts && data.carousel_posts.length > 0) {
+                data.carousel_posts.forEach(post => {
+                    socialContainer.innerHTML += `<div class="bg-slate-900 p-6 rounded-lg border border-slate-800"><p class="text-white">${post.content || post}</p></div>`;
+                });
+            } else {
+                socialContainer.innerHTML = `<p class="text-gray-400 text-center col-span-full">Konten sosial tidak dapat dibuat.</p>`;
+            }
+            lucide.createIcons();
+            setupTabs();
+        }
+
+        function setupTabs() {
+            const tabButtons = document.querySelectorAll('.tab-btn');
+            tabButtons.forEach(button => {
+                button.addEventListener('click', () => {
+                    tabButtons.forEach(btn => btn.classList.remove('border-indigo-500', 'text-white'));
+                    document.querySelectorAll('.tab-pane').forEach(pane => pane.classList.add('hidden'));
+                    button.classList.add('border-indigo-500', 'text-white');
+                    document.getElementById(`${button.dataset.tab}-content`).classList.remove('hidden');
+                });
+            });
+            document.getElementById('copy-blog-btn')?.addEventListener('click', (e) => {
+                const btn = e.currentTarget;
+                navigator.clipboard.writeText(document.getElementById('blog-article-container').innerText).then(() => {
+                    btn.innerHTML = '<i data-lucide="check" class="w-4 h-4 mr-2"></i>Tersalin!';
+                    setTimeout(() => {
+                        btn.innerHTML = '<i data-lucide="copy" class="w-4 h-4 mr-2"></i>Salin Artikel';
+                        lucide.createIcons();
+                    }, 2000);
+                });
+            });
+        }
+
+        async function checkSession() {
+            try {
+                const res = await fetch('/api/get-session', { credentials: 'include' });
+                if (res.ok) user = await res.json();
+            } catch (e) { console.error("Session check failed"); }
+            finally { updateUI(); }
+        }
+
+        // Modal functions
+        function showSignupModal(mode = 'signup') {
+            const modal = document.getElementById('auth-modal');
+            if(modal) {
+                modal.classList.remove('hidden');
+                showAuthTab(mode);
+            }
+        }
+        
+        function closeAuthModal() { document.getElementById('auth-modal')?.classList.add('hidden'); }
+        
+        function showAuthTab(tabName) {
+            document.querySelectorAll('.auth-tab').forEach(tab => tab.classList.remove('active'));
+            document.getElementById(`${tabName}-tab`)?.classList.add('active');
+            
+            document.querySelectorAll('.auth-form').forEach(form => form.classList.add('hidden'));
+            document.getElementById(`${tabName}-form`)?.classList.remove('hidden');
+            
+            document.getElementById('auth-modal-title').textContent = tabName === 'signup' ? 'Get Started for Free' : 'Welcome Back';
+        }
+        
+        async function handleAuth(formData, endpoint) {
+            const isLogin = endpoint.includes('login');
+            try {
+                const response = await fetch(endpoint, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify(Object.fromEntries(formData))
+                });
+                const data = await response.json();
+                if (response.ok) {
+                    if (isLogin) {
+                        user = data;
+                        closeAuthModal();
+                        updateUI();
+                        if (pendingUrl) { startProcessing(pendingUrl); pendingUrl = null; }
+                    } else {
+                        showAuthTab('login');
+                        document.querySelector('#login-form [name="email"]').value = formData.get('email');
+                    }
+                } else {
+                    alert(data.error || 'An error occurred');
+                }
+            } catch (e) {
+                alert(e.message);
+            }
+        }
+        
+        function closeCreditsModal() { creditsModal.classList.add('hidden'); }
+        function showPremiumModal() { alert("Fitur ini belum tersedia."); }
+        function showEnterpriseModal() { if (confirm('Hubungi kami untuk paket Enterprise?')) { window.open('mailto:official@askaraai.com?subject=Enterprise Package Inquiry', '_blank'); } }
+        
+        // Google Sign-In callback - FIXED
+        async function handleCredentialResponse(response) {
+            try {
+                const res = await fetch('/api/auth/google', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify({ token: response.credential })
+                });
+                const data = await res.json();
+                if (res.ok) {
+                    user = data;
+                    closeAuthModal();
+                    updateUI();
+                    if (pendingUrl) { startProcessing(pendingUrl); pendingUrl = null; }
+                } else {
+                    throw new Error(data.error || "Server verification failed.");
+                }
+            } catch (error) {
+                alert("Google Sign-In failed: " + error.message);
+            }
+        }
+        
+        // Initialize
+        document.addEventListener('DOMContentLoaded', async () => {
+            await loadGoogleConfig();
+            await checkSession();
+            
+            generateButton.addEventListener('click', () => {
+                const url = videoUrlInput.value.trim();
+                if (!url || !url.startsWith('http')) {
+                    errorMessage.textContent = 'Harap masukkan link YouTube yang valid.';
+                    errorMessage.classList.remove('hidden');
+                    return;
+                }
+                errorMessage.classList.add('hidden');
+                if (user) { 
+                    startProcessing(url); 
+                } else {
+                    pendingUrl = url;
+                    showSignupModal('login');
+                }
+            });
+
+            document.getElementById('signup-form')?.addEventListener('submit', (e) => {
+                e.preventDefault();
+                handleAuth(new FormData(e.target), '/api/signup/free');
+            });
+            document.getElementById('login-form')?.addEventListener('submit', (e) => {
+                e.preventDefault();
+                handleAuth(new FormData(e.target), '/api/auth/login');
+            });
+        });
+
+        // Global functions untuk onclick
+        window.showSignupModal = showSignupModal;
+        window.showAuthTab = showAuthTab;
+        window.closeAuthModal = closeAuthModal;
+        window.closeCreditsModal = closeCreditsModal;
+        window.showPremiumModal = showPremiumModal;
+        window.showEnterpriseModal = showEnterpriseModal;
+        window.handleCredentialResponse = handleCredentialResponse;
+    </script>
+</body>
+</html>

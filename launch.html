@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="id" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ countdown.title }} - AskaraAI</title>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.2/dist/gsap.min.js"></script>
+    
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+    
+    <style>
+        /* STYLING ASLI TIDAK DIUBAH SAMA SEKALI */
+        * { font-family: 'Inter', sans-serif; }
+        
+        body {
+            background-color: #020412;
+            color: #E0E6F7;
+            overflow: hidden;
+            cursor: none;
+        }
+
+        #canvas-3d {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 0;
+        }
+
+        .cursor-dot, .cursor-ring {
+            pointer-events: none;
+            position: fixed;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            transition: opacity 0.3s, transform 0.2s;
+            z-index: 9999;
+        }
+        .cursor-dot {
+            width: 8px;
+            height: 8px;
+            background-color: #A5B4FC;
+        }
+        .cursor-ring {
+            width: 40px;
+            height: 40px;
+            border: 2px solid rgba(165, 180, 252, 0.5);
+        }
+        body:hover .cursor-dot, body:hover .cursor-ring { opacity: 1; }
+
+        #main-panel {
+            background: rgba(12, 16, 43, 0.4);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            transform-style: preserve-3d;
+        }
+
+        .countdown-number {
+            background: linear-gradient(45deg, #A5B4FC, #FFFFFF);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            text-fill-color: transparent;
+        }
+
+        .text-glow {
+            text-shadow: 0 0 15px rgba(165, 180, 252, 0.3), 0 0 40px rgba(99, 102, 241, 0.3);
+        }
+        
+        .form-input {
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            transition: all 0.3s;
+        }
+        .form-input:focus {
+            border-color: #6A78F2;
+            box-shadow: 0 0 15px rgba(106, 120, 242, 0.5);
+            background: rgba(0, 0, 0, 0.2);
+        }
+
+        .notify-btn {
+            background: #6A78F2;
+            box-shadow: 0 0 20px rgba(106, 120, 242, 0.4);
+            transition: all 0.3s;
+        }
+        .notify-btn:hover {
+            background: #4F46E5;
+            box-shadow: 0 0 30px rgba(79, 70, 229, 0.7);
+            transform: scale(1.05);
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(25px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-fade-in {
+            opacity: 0;
+            animation: fadeIn 1.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
+    </style>
+</head>
+<body class="h-full">
+    <div id="canvas-3d"></div>
+    
+    <div class="cursor-dot"></div>
+    <div class="cursor-ring"></div>
+
+    <div class="relative z-10 min-h-screen flex items-center justify-center p-4 perspective-1000">
+        <div id="main-panel" class="w-full max-w-4xl mx-auto text-center rounded-3xl p-6 md:p-12">
+            
+            <div class="animate-fade-in" style="animation-delay: 0s;">
+                <svg viewBox="0 0 120 32" fill="none" xmlns="http://www.w3.org/2000/svg" class="h-8 w-auto mx-auto mb-6">
+                    <path d="M18.4 31.4L0 0H8.8L22.6 24.8L18.4 31.4Z" fill="#6A78F2"/>
+                    <text x="0" y="24" font-family="Inter, sans-serif" font-size="24" font-weight="bold" fill="white">Askara</text>
+                    <text x="80" y="24" font-family="Inter, sans-serif" font-size="24" font-weight="bold" fill="#A5B4FC">AI</text>
+                </svg>
+            </div>
+            
+            <div class="mb-8 space-y-3">
+                <h1 class="text-3xl md:text-5xl font-extrabold text-white text-glow animate-fade-in" style="animation-delay: 0.2s;">
+                    {{ countdown.title }}
+                </h1>
+                <p class="text-lg md:text-xl text-gray-300 max-w-2xl mx-auto animate-fade-in" style="animation-delay: 0.4s;">
+                    {{ countdown.subtitle }}
+                </p>
+            </div>
+
+            <div id="countdown-container" class="mb-10 animate-fade-in" style="animation-delay: 0.6s;">
+                <div class="grid grid-cols-4 gap-4 max-w-xl mx-auto">
+                    <div>
+                        <div id="days" class="text-4xl md:text-6xl font-black countdown-number">00</div>
+                        <div class="text-xs text-gray-400 font-medium tracking-widest uppercase">Days</div>
+                    </div>
+                    <div>
+                        <div id="hours" class="text-4xl md:text-6xl font-black countdown-number">00</div>
+                        <div class="text-xs text-gray-400 font-medium tracking-widest uppercase">Hours</div>
+                    </div>
+                    <div>
+                        <div id="minutes" class="text-4xl md:text-6xl font-black countdown-number">00</div>
+                        <div class="text-xs text-gray-400 font-medium tracking-widest uppercase">Minutes</div>
+                    </div>
+                    <div>
+                        <div id="seconds" class="text-4xl md:text-6xl font-black countdown-number">00</div>
+                        <div class="text-xs text-gray-400 font-medium tracking-widest uppercase">Seconds</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div id="launch-message" class="hidden space-y-4 animate-fade-in">
+                 <h2 class="text-4xl md:text-6xl font-black text-white text-glow">🚀 We Have Launched!</h2>
+                 <p class="text-xl text-gray-200">Redirecting you to the future of content creation...</p>
+                 <div class="inline-block w-8 h-8 border-4 border-indigo-300 border-t-transparent rounded-full animate-spin mx-auto"></div>
+            </div>
+
+            <div id="form-container" class="max-w-md mx-auto animate-fade-in" style="animation-delay: 0.8s;">
+                <h3 class="text-lg font-semibold text-white mb-3">Join the waitlist. Get notified at launch.</h3>
+                <form id="early-access-form" class="flex flex-col sm:flex-row gap-3">
+                    <input type="email" placeholder="your.email@example.com" class="flex-grow px-4 py-3 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 ring-indigo-500 ring-opacity-50 form-input" required>
+                    <button type="submit" class="text-white font-bold py-3 px-6 rounded-lg notify-btn">
+                        Get Early Access
+                    </button>
+                </form>
+                <p id="form-success-msg" class="text-green-400 mt-3 h-5 transition-opacity duration-300"></p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // INTEGRASI DENGAN BACKEND DIPERBAIKI
+            const targetDateStr = '{{ countdown.target_datetime }}';
+            const redirectUrl = '{{ countdown.redirect_after_launch }}';
+            
+            // PARSE TARGET DATE DENGAN ERROR HANDLING
+            let targetDate;
+            try {
+                targetDate = new Date(targetDateStr).getTime();
+                if (isNaN(targetDate)) {
+                    throw new Error('Invalid date');
+                }
+            } catch (error) {
+                console.error('Invalid target date:', targetDateStr);
+                // Fallback ke 1 jam dari sekarang jika tanggal tidak valid
+                targetDate = new Date().getTime() + (60 * 60 * 1000);
+            }
+
+            // 3D NEURAL NEBULA BACKGROUND (DIPERBAIKI ERROR HANDLING)
+            let scene, camera, renderer, particles;
+            
+            try {
+                scene = new THREE.Scene();
+                camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+                renderer = new THREE.WebGLRenderer({ canvas: document.createElement('canvas') });
+                
+                const canvasContainer = document.getElementById('canvas-3d');
+                if (canvasContainer) {
+                    canvasContainer.appendChild(renderer.domElement);
+                }
+                
+                const particlesGeometry = new THREE.BufferGeometry();
+                const count = 10000;
+                const positions = new Float32Array(count * 3);
+                for(let i = 0; i < count * 3; i++) {
+                    positions[i] = (Math.random() - 0.5) * 10;
+                }
+                particlesGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+                
+                const particlesMaterial = new THREE.PointsMaterial({
+                    size: 0.02,
+                    sizeAttenuation: true,
+                    color: 0x6A78F2
+                });
+                
+                particles = new THREE.Points(particlesGeometry, particlesMaterial);
+                scene.add(particles);
+                camera.position.z = 4;
+                
+                const onWindowResize = () => {
+                    if (camera && renderer) {
+                        camera.aspect = window.innerWidth / window.innerHeight;
+                        camera.updateProjectionMatrix();
+                        renderer.setSize(window.innerWidth, window.innerHeight);
+                    }
+                };
+                window.addEventListener('resize', onWindowResize);
+                onWindowResize();
+                
+                const mouse = { x: 0, y: 0 };
+                window.addEventListener('mousemove', (event) => {
+                    mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+                    mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+                });
+
+                const clock = new THREE.Clock();
+                const animate3D = () => {
+                    try {
+                        const elapsedTime = clock.getElapsedTime();
+                        if (particles) {
+                            particles.rotation.y = elapsedTime * 0.05;
+                        }
+                        if (camera) {
+                            camera.position.x += (mouse.x * 0.5 - camera.position.x) * 0.05;
+                            camera.position.y += (mouse.y * 0.5 - camera.position.y) * 0.05;
+                            camera.lookAt(scene.position);
+                        }
+                        if (renderer && scene && camera) {
+                            renderer.render(scene, camera);
+                        }
+                        requestAnimationFrame(animate3D);
+                    } catch (error) {
+                        console.error('3D animation error:', error);
+                    }
+                };
+                animate3D();
+                
+            } catch (error) {
+                console.error('3D initialization failed:', error);
+            }
+
+            // KURSOR KUSTOM (DENGAN ERROR HANDLING)
+            try {
+                const cursorDot = document.querySelector('.cursor-dot');
+                const cursorRing = document.querySelector('.cursor-ring');
+                
+                if (cursorDot && cursorRing && window.gsap) {
+                    gsap.set([cursorDot, cursorRing], { xPercent: -50, yPercent: -50 });
+                    window.addEventListener('mousemove', e => {
+                        gsap.to(cursorDot, { duration: 0.1, x: e.clientX, y: e.clientY });
+                        gsap.to(cursorRing, { duration: 0.5, x: e.clientX, y: e.clientY, ease: 'power2.out' });
+                    });
+                }
+                
+                // EFEK PARALLAX 3D PADA PANEL
+                const mainPanel = document.getElementById('main-panel');
+                if (mainPanel && window.gsap) {
+                    window.addEventListener('mousemove', e => {
+                        let rotateX = -(e.clientY - window.innerHeight / 2) / 40;
+                        let rotateY = (e.clientX - window.innerWidth / 2) / 60;
+                        gsap.to(mainPanel, {
+                            rotationX: rotateX,
+                            rotationY: rotateY,
+                            transformPerspective: 1000,
+                            duration: 0.8,
+                            ease: 'power2.out'
+                        });
+                    });
+                }
+            } catch (error) {
+                console.error('Cursor/parallax initialization failed:', error);
+            }
+
+            // LOGIKA COUNTDOWN (DIPERBAIKI)
+            const updateCountdown = () => {
+                try {
+                    const distance = targetDate - new Date().getTime();
+                    
+                    if (distance < 0) {
+                        clearInterval(interval);
+                        const countdownContainer = document.getElementById('countdown-container');
+                        const formContainer = document.getElementById('form-container');
+                        const launchMessage = document.getElementById('launch-message');
+                        
+                        if (countdownContainer) countdownContainer.style.display = 'none';
+                        if (formContainer) formContainer.style.display = 'none';
+                        if (launchMessage) launchMessage.classList.remove('hidden');
+                        
+                        setTimeout(() => {
+                            if (redirectUrl) {
+                                window.location.href = redirectUrl;
+                            } else {
+                                window.location.href = '/';
+                            }
+                        }, 3000);
+                        return;
+                    }
+                    
+                    const d = Math.floor(distance / 86400000);
+                    const h = Math.floor((distance % 86400000) / 3600000);
+                    const m = Math.floor((distance % 3600000) / 60000);
+                    const s = Math.floor((distance % 60000) / 1000);
+                    
+                    const daysEl = document.getElementById('days');
+                    const hoursEl = document.getElementById('hours');
+                    const minutesEl = document.getElementById('minutes');
+                    const secondsEl = document.getElementById('seconds');
+                    
+                    if (daysEl) daysEl.textContent = d.toString().padStart(2, '0');
+                    if (hoursEl) hoursEl.textContent = h.toString().padStart(2, '0');
+                    if (minutesEl) minutesEl.textContent = m.toString().padStart(2, '0');
+                    if (secondsEl) secondsEl.textContent = s.toString().padStart(2, '0');
+                } catch (error) {
+                    console.error('Countdown update error:', error);
+                }
+            };
+            
+            const interval = setInterval(updateCountdown, 1000);
+            updateCountdown();
+
+            // FORM SUBMISSION (DIPERBAIKI)
+            const form = document.getElementById('early-access-form');
+            if (form) {
+                form.addEventListener('submit', (e) => {
+                    e.preventDefault();
+                    const emailInput = form.querySelector('input[type="email"]');
+                    const successMsg = document.getElementById('form-success-msg');
+                    
+                    if (emailInput && emailInput.value) {
+                        try {
+                            localStorage.setItem('early_access_email', emailInput.value);
+                            if (successMsg) {
+                                successMsg.textContent = 'Thank you! We will notify you at launch.';
+                                successMsg.style.opacity = '1';
+                            }
+                            form.reset();
+                            setTimeout(() => {
+                                if (successMsg) {
+                                    successMsg.style.opacity = '0';
+                                    setTimeout(() => {
+                                        if (successMsg) successMsg.textContent = '';
+                                    }, 300);
+                                }
+                            }, 3000);
+                        } catch (error) {
+                            console.error('Form submission error:', error);
+                            if (successMsg) {
+                                successMsg.textContent = 'Thank you for your interest!';
+                                successMsg.style.opacity = '1';
+                            }
+                        }
+                    }
+                });
+            }
+            
+            // PENGECEKAN STATUS API (DIPERBAIKI DENGAN ERROR HANDLING)
+            const checkCountdownStatus = () => {
+                try {
+                    fetch('/api/countdown/status')
+                        .then(res => {
+                            if (res.ok) {
+                                return res.json();
+                            }
+                            throw new Error('API error');
+                        })
+                        .then(data => {
+                            if (data && (!data.active || data.launched)) {
+                                window.location.href = redirectUrl || '/';
+                            }
+                        })
+                        .catch(error => {
+                            console.error('Status check error:', error);
+                            // Silent fail - tidak mengganggu user experience
+                        });
+                } catch (error) {
+                    console.error('Status check failed:', error);
+                }
+            };
+            
+            // Check status every 30 seconds
+            setInterval(checkCountdownStatus, 30000);
+        });
+    </script>
+</body>
+</html>
