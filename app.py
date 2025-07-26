@@ -1,34 +1,51 @@
-# app.py - FIXED VERSION - Main Flask Application
-# Semua masalah circular import dan missing endpoints diperbaiki
+# app.py - SECURITY ENHANCED VERSION - Main Flask Application
+# Enhanced dengan CSRF protection, input validation, caching, dan security improvements
 
 import os
 import logging
 import secrets
 import json
+import magic
 from datetime import datetime, timedelta
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for, send_from_directory
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from flask_mail import Mail, Message
+from flask_wtf.csrf import CSRFProtect
+from flask_caching import Cache
+from flask_marshmallow import Marshmallow
+from marshmallow import Schema, fields, validate, ValidationError
 from dotenv import load_dotenv
 import redis
 import google.generativeai as genai
 from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
 from werkzeug.security import generate_password_hash, check_password_hash
+import structlog
+import psutil
 
-# Tambahkan ke app.py
-from flask_wtf.csrf import CSRFProtect
-
-csrf = CSRFProtect(app)
 # Load environment variables
 load_dotenv()
 
 # Import models from separate file (SOLUSI CIRCULAR IMPORT)
 from app_models import db, User, VideoProcess, VideoClip, Payment, CountdownSettings, PromoCode, SystemHealth, PromoUsage
 
-# Configure logging
+# Configure structured logging
+structlog.configure(
+    processors=[
+        structlog.contextvars.merge_contextvars,
+        structlog.processors.add_log_level,
+        structlog.processors.StackInfoRenderer(),
+        structlog.dev.ConsoleRenderer()
+    ],
+    wrapper_class=structlog.make_filtering_bound_logger(logging.INFO),
+    logger_factory=structlog.WriteLoggerFactory(),
+    cache_logger_on_first_use=True,
+)
+logger = structlog.get_logger()
+
+# Configure basic logging as fallback
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -37,7 +54,31 @@ logging.basicConfig(
         logging.StreamHandler()
     ]
 )
-logger = logging.getLogger(__name__)
+
+# ===== INPUT VALIDATION SCHEMAS =====
+class VideoProcessSchema(Schema):
+    url = fields.Url(required=True, validate=validate.Length(max=500))
+
+class UserSignupSchema(Schema):
+    name = fields.Str(required=True, validate=validate.Length(min=2, max=100))
+    email = fields.Email(required=True, validate=validate.Length(max=120))
+    password = fields.Str(required=True, validate=validate.Length(min=8, max=128))
+
+class UserLoginSchema(Schema):
+    email = fields.Email(required=True, validate=validate.Length(max=120))
+    password = fields.Str(required=True, validate=validate.Length(min=1, max=128))
+
+class PromoCodeSchema(Schema):
+    code = fields.Str(required=True, validate=validate.Length(min=3, max=50))
+    description = fields.Str(required=True, validate=validate.Length(min=5, max=200))
+    discount_type = fields.Str(required=True, validate=validate.OneOf(['percentage', 'days', 'credits']))
+    discount_value = fields.Float(required=True, validate=validate.Range(min=0, max=100))
+    max_uses = fields.Int(validate=validate.Range(min=1, max=10000))
+
+# ===== SECURITY CONSTANTS =====
+ALLOWED_VIDEO_EXTENSIONS = {'mp4', 'avi', 'mov', 'mkv', 'webm'}
+MAX_FILE_SIZE = 500 * 1024 * 1024  # 500MB
+MAX_VIDEO_DURATION = 10800  # 3 hours
 
 # ===== CREATE APP FUNCTION =====
 def create_app():
@@ -46,7 +87,7 @@ def create_app():
     # Configuration
     app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', secrets.token_hex(32))
     
-    # Database configuration with better error handling
+    # Database configuration with enhanced connection pool
     database_url = os.getenv('DATABASE_URL')
     if not database_url:
         db_password = os.getenv('DB_PASSWORD')
@@ -62,8 +103,18 @@ def create_app():
         'pool_pre_ping': True,
         'pool_timeout': 30,
         'max_overflow': 20,
-        'pool_size': 10
+        'pool_size': 10,
+        'pool_reset_on_return': 'commit'  # Enhanced safety
     }
+    
+    # CSRF Protection
+    app.config['WTF_CSRF_TIME_LIMIT'] = 3600  # 1 hour
+    app.config['WTF_CSRF_SSL_STRICT'] = False  # Set to True in production with HTTPS
+    
+    # Caching configuration
+    app.config['CACHE_TYPE'] = 'redis'
+    app.config['CACHE_REDIS_URL'] = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
+    app.config['CACHE_DEFAULT_TIMEOUT'] = 300
     
     # Other configurations
     app.config['MAIL_SERVER'] = os.getenv('SMTP_HOST', 'smtp.hostinger.com')
@@ -87,14 +138,18 @@ db.init_app(app)
 login_manager = LoginManager(app)
 login_manager.login_view = 'login'
 mail = Mail(app)
+csrf = CSRFProtect(app)
+cache = Cache(app)
+ma = Marshmallow(app)
 
-# Rate limiting with better error handling
+# Rate limiting with enhanced security
 try:
     limiter = Limiter(
         app=app,
         key_func=get_remote_address,
         default_limits=["1000 per day", "100 per hour"],
-        storage_uri=os.getenv('REDIS_URL', 'redis://localhost:6379/0')
+        storage_uri=os.getenv('REDIS_URL', 'redis://localhost:6379/0'),
+        headers_enabled=True
     )
     logger.info("✅ Rate limiter initialized")
 except Exception as e:
@@ -128,6 +183,65 @@ def load_user(user_id):
     except Exception:
         return None
 
+# ===== SECURITY HELPER FUNCTIONS =====
+def validate_video_file(file_content):
+    """Validate video file content using python-magic"""
+    try:
+        # Check MIME type
+        file_magic = magic.from_buffer(file_content[:1024], mime=True)
+        
+        if not file_magic.startswith('video/'):
+            raise ValueError("File is not a valid video")
+        
+        # Check file size
+        if len(file_content) > MAX_FILE_SIZE:
+            raise ValueError(f"File too large. Maximum size: {MAX_FILE_SIZE // (1024*1024)}MB")
+        
+        return True
+    except Exception as e:
+        logger.error("File validation failed", error=str(e))
+        raise ValueError(f"File validation failed: {str(e)}")
+
+def monitor_system_resources():
+    """Monitor system resources and raise alerts if necessary"""
+    try:
+        # Check memory usage
+        memory = psutil.virtual_memory()
+        if memory.percent > 90:
+            logger.warning("High memory usage detected", memory_percent=memory.percent)
+            
+        # Check disk usage
+        disk = psutil.disk_usage('/')
+        if disk.percent > 90:
+            logger.critical("Critical disk usage", disk_percent=disk.percent)
+            
+        return {
+            'memory_percent': memory.percent,
+            'disk_percent': disk.percent,
+            'cpu_percent': psutil.cpu_percent(interval=1)
+        }
+    except Exception as e:
+        logger.error("Resource monitoring failed", error=str(e))
+        return {}
+
+def validate_youtube_url(url):
+    """Enhanced YouTube URL validation"""
+    if not url or not isinstance(url, str):
+        return False
+    
+    # Basic URL validation
+    if not (url.startswith('http://') or url.startswith('https://')):
+        return False
+    
+    # YouTube domain validation
+    valid_domains = ['youtube.com', 'www.youtube.com', 'youtu.be', 'm.youtube.com']
+    
+    for domain in valid_domains:
+        if domain in url:
+            return True
+    
+    return False
+
 # ===== BASIC ROUTES =====
 @app.route('/')
 def index():
@@ -146,7 +260,7 @@ def launch_page():
         
         return render_template('launch.html', countdown=countdown_settings)
     except Exception as e:
-        logger.error(f"Launch page error: {str(e)}")
+        logger.error("Launch page error", error=str(e))
         return redirect('/')
 
 @app.route('/admin')
@@ -154,26 +268,16 @@ def launch_page():
 def admin_dashboard():
     """Admin dashboard - hanya untuk admin"""
     if not current_user.is_admin or current_user.email != 'ujangbawbaw@gmail.com':
+        logger.warning("Unauthorized admin access attempt", user_email=current_user.email)
         return redirect(url_for('index'))
     
     try:
-        # Get statistics
-        total_users = User.query.count()
-        premium_users = User.query.filter_by(is_premium=True).count()
-        total_videos_processed = VideoProcess.query.count()
-        total_clips_generated = db.session.query(db.func.sum(VideoProcess.clips_generated)).scalar() or 0
-        recent_users = User.query.order_by(User.created_at.desc()).limit(10).all()
-        recent_processes = VideoProcess.query.order_by(VideoProcess.created_at.desc()).limit(10).all()
+        # Get statistics with caching
+        stats = get_admin_stats()
         
-        return render_template('admin.html',
-                             total_users=total_users,
-                             premium_users=premium_users,
-                             total_videos_processed=total_videos_processed,
-                             total_clips_generated=total_clips_generated,
-                             recent_users=recent_users,
-                             recent_processes=recent_processes)
+        return render_template('admin.html', **stats)
     except Exception as e:
-        logger.error(f"Admin dashboard error: {str(e)}")
+        logger.error("Admin dashboard error", error=str(e))
         return render_template('admin.html',
                              total_users=0,
                              premium_users=0,
@@ -182,9 +286,40 @@ def admin_dashboard():
                              recent_users=[],
                              recent_processes=[])
 
-# ===== API ENDPOINTS =====
+@cache.cached(timeout=300, key_prefix='admin_stats')
+def get_admin_stats():
+    """Get admin statistics with caching"""
+    try:
+        total_users = User.query.count()
+        premium_users = User.query.filter_by(is_premium=True).count()
+        total_videos_processed = VideoProcess.query.count()
+        total_clips_generated = db.session.query(db.func.sum(VideoProcess.clips_generated)).scalar() or 0
+        recent_users = User.query.order_by(User.created_at.desc()).limit(10).all()
+        recent_processes = VideoProcess.query.order_by(VideoProcess.created_at.desc()).limit(10).all()
+        
+        return {
+            'total_users': total_users,
+            'premium_users': premium_users,
+            'total_videos_processed': total_videos_processed,
+            'total_clips_generated': total_clips_generated,
+            'recent_users': recent_users,
+            'recent_processes': recent_processes
+        }
+    except Exception as e:
+        logger.error("Error getting admin stats", error=str(e))
+        return {
+            'total_users': 0,
+            'premium_users': 0,
+            'total_videos_processed': 0,
+            'total_clips_generated': 0,
+            'recent_users': [],
+            'recent_processes': []
+        }
+
+# ===== API ENDPOINTS WITH ENHANCED SECURITY =====
 
 @app.route('/api/config/google-client-id', methods=['GET'])
+@cache.cached(timeout=3600)  # Cache for 1 hour
 def get_google_client_id():
     """Get Google Client ID for frontend"""
     return jsonify({'client_id': app.config.get('GOOGLE_CLIENT_ID')})
@@ -205,12 +340,14 @@ def get_session():
 @login_required
 def logout():
     """Logout user"""
+    logger.info("User logout", user_email=current_user.email)
     logout_user()
     return jsonify({'success': True})
 
 @app.route('/api/auth/google', methods=['POST'])
+@limiter.limit("10 per minute")
 def google_auth():
-    """Google OAuth authentication"""
+    """Google OAuth authentication with enhanced security"""
     try:
         data = request.json
         token = data.get('token')
@@ -230,13 +367,17 @@ def google_auth():
                 raise ValueError('Wrong issuer.')
                 
         except ValueError as e:
-            logger.error(f"Google token verification failed: {str(e)}")
+            logger.error("Google token verification failed", error=str(e))
             return jsonify({'error': 'Invalid token'}), 400
         
         # Get user info from token
         google_id = idinfo['sub']
         email = idinfo['email']
         name = idinfo['name']
+        
+        # Validate email domain (optional security measure)
+        if '@' not in email or len(email) > 120:
+            return jsonify({'error': 'Invalid email format'}), 400
         
         # Find or create user
         try:
@@ -260,9 +401,11 @@ def google_auth():
             user.last_login = datetime.utcnow()
             db.session.commit()
             
+            logger.info("Google auth success", user_email=email, new_user=user.id)
+            
         except Exception as e:
             db.session.rollback()
-            logger.error(f"Database error in Google auth: {str(e)}")
+            logger.error("Database error in Google auth", error=str(e))
             return jsonify({'error': 'Database error'}), 500
         
         # Login user
@@ -276,28 +419,33 @@ def google_auth():
         })
         
     except Exception as e:
-        logger.error(f"Google auth error: {str(e)}")
+        logger.error("Google auth error", error=str(e))
         return jsonify({'error': 'Authentication failed'}), 500
 
 @app.route('/api/auth/login', methods=['POST'])
+@limiter.limit("5 per minute")
 def login():
-    """Email/password login"""
+    """Email/password login with input validation"""
     try:
-        data = request.json
-        email = data.get('email', '').lower().strip()
-        password = data.get('password', '')
+        # Validate input
+        schema = UserLoginSchema()
+        try:
+            data = schema.load(request.json)
+        except ValidationError as err:
+            return jsonify({'error': 'Invalid input', 'details': err.messages}), 400
         
-        if not email or not password:
-            return jsonify({'error': 'Email and password are required'}), 400
+        email = data['email'].lower().strip()
+        password = data['password']
         
         # Find user
         try:
             user = User.query.filter_by(email=email).first()
         except Exception as e:
-            logger.error(f"Database error in login: {str(e)}")
+            logger.error("Database error in login", error=str(e))
             return jsonify({'error': 'Database error'}), 500
             
         if not user or not user.check_password(password):
+            logger.warning("Failed login attempt", email=email)
             return jsonify({'error': 'Invalid email or password'}), 401
         
         # Update last login
@@ -306,10 +454,12 @@ def login():
             db.session.commit()
         except Exception as e:
             db.session.rollback()
-            logger.error(f"Error updating last login: {str(e)}")
+            logger.error("Error updating last login", error=str(e))
         
         # Login user
         login_user(user, remember=True)
+        
+        logger.info("User login success", user_email=email)
         
         return jsonify({
             'email': user.email,
@@ -319,27 +469,34 @@ def login():
         })
         
     except Exception as e:
-        logger.error(f"Login error: {str(e)}")
+        logger.error("Login error", error=str(e))
         return jsonify({'error': 'Login failed'}), 500
 
 @app.route('/api/signup/free', methods=['POST'])
+@limiter.limit("3 per minute")
 def signup_free():
-    """Free signup with email/password"""
+    """Free signup with enhanced validation"""
     try:
-        data = request.json
+        # Validate input
+        schema = UserSignupSchema()
+        try:
+            data = schema.load(request.json)
+        except ValidationError as err:
+            return jsonify({'error': 'Invalid input', 'details': err.messages}), 400
         
-        email = data.get('email', '').lower().strip()
-        password = data.get('password', '')
-        name = data.get('name', '').strip()
+        email = data['email'].lower().strip()
+        password = data['password']
+        name = data['name'].strip()
         
-        if not email or not password or not name:
-            return jsonify({'error': 'All fields are required'}), 400
+        # Additional security checks
+        if len(name.split()) < 1:
+            return jsonify({'error': 'Please provide a valid name'}), 400
         
         # Check if user exists
         try:
             existing_user = User.query.filter_by(email=email).first()
         except Exception as e:
-            logger.error(f"Database error checking existing user: {str(e)}")
+            logger.error("Database error checking existing user", error=str(e))
             return jsonify({'error': 'Database error'}), 500
             
         if existing_user:
@@ -359,11 +516,11 @@ def signup_free():
             db.session.add(user)
             db.session.commit()
             
-            logger.info(f"New user created: {email}")
+            logger.info("New user created", user_email=email)
             
         except Exception as e:
             db.session.rollback()
-            logger.error(f"Error creating user: {str(e)}")
+            logger.error("Error creating user", error=str(e))
             return jsonify({'error': 'Failed to create account'}), 500
         
         return jsonify({
@@ -373,26 +530,38 @@ def signup_free():
         })
         
     except Exception as e:
-        logger.error(f"Error in free signup: {str(e)}")
+        logger.error("Error in free signup", error=str(e))
         return jsonify({'error': 'Failed to create account'}), 500
 
 @app.route('/api/process-video', methods=['POST'])
+@limiter.limit("2 per minute", per_method=True)
+@limiter.limit("10 per hour", per_method=True)
 @login_required
 def process_video():
-    """Process YouTube video"""
+    """Process YouTube video with enhanced validation"""
     try:
-        data = request.json
-        url = data.get('url')
+        # Monitor system resources
+        resources = monitor_system_resources()
+        if resources.get('memory_percent', 0) > 85:
+            logger.warning("High memory usage, delaying video processing")
+            return jsonify({'error': 'System busy, please try again later'}), 503
         
-        if not url:
-            return jsonify({'error': 'URL is required'}), 400
+        # Validate input
+        schema = VideoProcessSchema()
+        try:
+            data = schema.load(request.json)
+        except ValidationError as err:
+            return jsonify({'error': 'Invalid input', 'details': err.messages}), 400
         
-        # Validate YouTube URL
-        if 'youtube.com' not in url and 'youtu.be' not in url:
+        url = data['url']
+        
+        # Enhanced YouTube URL validation
+        if not validate_youtube_url(url):
             return jsonify({'error': 'Please provide a valid YouTube URL'}), 400
         
         # Check user credits for non-premium users
         if not current_user.is_premium_active() and current_user.credits < 10:
+            logger.info("Insufficient credits", user_email=current_user.email, credits=current_user.credits)
             return jsonify({'error': 'Insufficient credits'}), 402
         
         # Generate task ID
@@ -409,20 +578,23 @@ def process_video():
             db.session.add(video_process)
             db.session.commit()
             
-            logger.info(f"Video process created: {task_id} for user {current_user.email}")
+            logger.info("Video process created", 
+                       task_id=task_id, 
+                       user_email=current_user.email,
+                       url=url)
             
         except Exception as e:
             db.session.rollback()
-            logger.error(f"Error creating video process: {str(e)}")
+            logger.error("Error creating video process", error=str(e))
             return jsonify({'error': 'Database error'}), 500
         
         # Start Celery task (lazy import to avoid circular import)
         try:
             from celery_app import process_video_task
             process_video_task.delay(video_process.id, url)
-            logger.info(f"Celery task started for process {video_process.id}")
+            logger.info("Celery task started", process_id=video_process.id)
         except Exception as e:
-            logger.error(f"Error starting Celery task: {str(e)}")
+            logger.error("Error starting Celery task", error=str(e))
             return jsonify({'error': 'Failed to start processing'}), 500
         
         return jsonify({
@@ -432,13 +604,18 @@ def process_video():
         })
         
     except Exception as e:
-        logger.error(f"Process video error: {str(e)}")
+        logger.error("Process video error", error=str(e))
         return jsonify({'error': 'Failed to start video processing'}), 500
 
 @app.route('/api/task-status/<task_id>', methods=['GET'])
+@limiter.limit("30 per minute")
 def get_task_status(task_id):
-    """Get processing task status"""
+    """Get processing task status with enhanced security"""
     try:
+        # Validate task_id format
+        if not task_id or len(task_id) > 100:
+            return jsonify({'error': 'Invalid task ID'}), 400
+        
         # Get video process from database
         video_process = VideoProcess.query.filter_by(task_id=task_id).first()
         if not video_process:
@@ -490,115 +667,41 @@ def get_task_status(task_id):
             })
         
     except Exception as e:
-        logger.error(f"Task status error: {str(e)}")
+        logger.error("Task status error", error=str(e))
         return jsonify({'error': 'Failed to get task status'}), 500
 
-# ===== ADMIN API ENDPOINTS =====
-
-@app.route('/api/countdown/settings', methods=['GET'])
-@login_required
-def get_countdown_settings():
-    """Get countdown settings (admin only)"""
-    if not current_user.is_admin:
-        return jsonify({'error': 'Unauthorized'}), 403
-    
-    try:
-        countdown = CountdownSettings.get_current()
-        return jsonify({
-            'is_active': countdown.is_active,
-            'target_datetime': countdown.target_datetime.isoformat() if countdown.target_datetime else None,
-            'title': countdown.title,
-            'subtitle': countdown.subtitle,
-            'background_style': countdown.background_style,
-            'redirect_after_launch': countdown.redirect_after_launch
-        })
-    except Exception as e:
-        logger.error(f"Error getting countdown settings: {str(e)}")
-        return jsonify({'error': 'Failed to get countdown settings'}), 500
-
-@app.route('/api/countdown/settings', methods=['POST'])
-@login_required
-def update_countdown_settings():
-    """Update countdown settings (admin only)"""
-    if not current_user.is_admin:
-        return jsonify({'error': 'Unauthorized'}), 403
-    
-    try:
-        data = request.json
-        countdown = CountdownSettings.get_current()
-        
-        if not countdown.id:
-            db.session.add(countdown)
-        
-        countdown.is_active = data.get('is_active', countdown.is_active)
-        countdown.title = data.get('title', countdown.title)
-        countdown.subtitle = data.get('subtitle', countdown.subtitle)
-        countdown.background_style = data.get('background_style', countdown.background_style)
-        countdown.redirect_after_launch = data.get('redirect_after_launch', countdown.redirect_after_launch)
-        
-        if data.get('target_datetime'):
-            countdown.target_datetime = datetime.fromisoformat(data['target_datetime'].replace('Z', '+00:00'))
-        
-        countdown.updated_at = datetime.utcnow()
-        db.session.commit()
-        
-        return jsonify({'success': True, 'message': 'Countdown settings updated'})
-        
-    except Exception as e:
-        db.session.rollback()
-        logger.error(f"Error updating countdown: {str(e)}")
-        return jsonify({'error': 'Failed to update countdown settings'}), 500
-
-@app.route('/api/system/health', methods=['GET'])
-@login_required
-def get_system_health():
-    """Get system health status (admin only)"""
-    if not current_user.is_admin:
-        return jsonify({'error': 'Unauthorized'}), 403
-    
-    try:
-        health_data = {
-            'timestamp': datetime.utcnow().isoformat(),
-            'database': {'status': 'healthy'},
-            'redis': {'status': 'unknown'},
-            'celery': {'status': 'unknown'},
-            'overall': 'healthy'
-        }
-        
-        # Test database
-        try:
-            db.engine.execute('SELECT 1')
-            health_data['database']['status'] = 'healthy'
-        except Exception as e:
-            health_data['database']['status'] = 'unhealthy'
-            health_data['database']['error'] = str(e)
-            health_data['overall'] = 'unhealthy'
-        
-        # Test Redis
-        if redis_client:
-            try:
-                redis_client.ping()
-                health_data['redis']['status'] = 'healthy'
-            except Exception as e:
-                health_data['redis']['status'] = 'unhealthy'
-                health_data['redis']['error'] = str(e)
-        
-        return jsonify(health_data)
-        
-    except Exception as e:
-        logger.error(f"Error checking system health: {str(e)}")
-        return jsonify({'error': 'Failed to check system health'}), 500
-
-# ===== STATIC FILE SERVING =====
+# ===== STATIC FILE SERVING WITH SECURITY =====
 @app.route('/clips/<filename>')
+@limiter.limit("20 per minute")
 def serve_clip(filename):
-    """Serve video clips"""
-    return send_from_directory('static/clips', filename)
+    """Serve video clips with security checks"""
+    try:
+        # Validate filename
+        if not filename or '..' in filename or '/' in filename:
+            return jsonify({'error': 'Invalid filename'}), 400
+        
+        # Check file extension
+        if not filename.lower().endswith('.mp4'):
+            return jsonify({'error': 'Invalid file type'}), 400
+        
+        return send_from_directory('static/clips', filename)
+    except Exception as e:
+        logger.error("Error serving clip", filename=filename, error=str(e))
+        return jsonify({'error': 'File not found'}), 404
 
 @app.route('/uploads/<filename>')
+@limiter.limit("10 per minute")
 def serve_upload(filename):
-    """Serve uploaded files"""
-    return send_from_directory('static/uploads', filename)
+    """Serve uploaded files with security checks"""
+    try:
+        # Validate filename
+        if not filename or '..' in filename or '/' in filename:
+            return jsonify({'error': 'Invalid filename'}), 400
+        
+        return send_from_directory('static/uploads', filename)
+    except Exception as e:
+        logger.error("Error serving upload", filename=filename, error=str(e))
+        return jsonify({'error': 'File not found'}), 404
 
 # ===== ERROR HANDLERS =====
 @app.errorhandler(404)
@@ -608,21 +711,34 @@ def not_found(error):
 @app.errorhandler(500)
 def internal_error(error):
     db.session.rollback()
-    logger.error(f"Internal server error: {str(error)}")
+    logger.error("Internal server error", error=str(error))
     return jsonify({'error': 'Internal server error'}), 500
+
+@app.errorhandler(429)
+def ratelimit_handler(e):
+    return jsonify({'error': 'Rate limit exceeded. Please try again later.'}), 429
+
+@app.errorhandler(CSRFError)
+def handle_csrf_error(e):
+    return jsonify({'error': 'CSRF token missing or invalid'}), 400
 
 # ===== HEALTH CHECK =====
 @app.route('/health')
+@cache.cached(timeout=60)
 def health_check():
     try:
         db.engine.execute('SELECT 1')
         redis_status = "connected" if redis_client and redis_client.ping() else "disconnected"
         
+        # System resource check
+        resources = monitor_system_resources()
+        
         return jsonify({
             'status': 'healthy',
             'database': 'connected',
             'redis': redis_status,
-            'timestamp': datetime.utcnow().isoformat()
+            'timestamp': datetime.utcnow().isoformat(),
+            'resources': resources
         })
     except Exception as e:
         return jsonify({
@@ -634,7 +750,7 @@ def health_check():
 # ===== CLI COMMANDS =====
 @app.cli.command()
 def init_db():
-    """Initialize database"""
+    """Initialize database with enhanced security"""
     try:
         logger.info("🔄 Initializing database...")
         
@@ -659,6 +775,8 @@ def init_db():
                 credits=999999,
                 is_premium=True
             )
+            # Set a secure password for admin
+            admin.set_password(secrets.token_urlsafe(32))
             db.session.add(admin)
             db.session.commit()
             logger.info(f"✅ Admin user created: {admin_email}")
