@@ -1,0 +1,63 @@
+# Flask Framework
+Flask==2.3.3
+Flask-SQLAlchemy==3.0.5
+Flask-Migrate==4.0.5
+Flask-Login==0.6.3
+Flask-Mail==0.9.1
+Flask-Limiter==3.5.0
+Flask-CORS==4.0.0
+
+# Database
+PyMySQL==1.1.0
+SQLAlchemy==2.0.21
+
+# Celery for background tasks
+celery==5.3.6
+redis==5.0.0
+
+# Google Services
+google-generativeai==0.3.0
+google-auth==2.23.3
+google-auth-oauthlib==1.1.0
+google-auth-httplib2==0.1.1
+
+# Video Processing
+yt-dlp==2023.9.24
+moviepy==1.0.3
+ffmpeg-python==0.2.0
+Pillow==10.0.1
+
+# HTTP Requests
+requests==2.31.0
+httpx==0.25.0
+
+# Security & Authentication
+cryptography==41.0.7
+PyJWT==2.8.0
+bcrypt==4.0.1
+
+# Web Server
+gunicorn==21.2.0
+
+# Environment & Configuration
+python-dotenv==1.0.0
+
+# Utilities
+python-dateutil==2.8.2
+pytz==2023.3
+validators==0.22.0
+
+# API & Webhooks
+marshmallow==3.20.1
+
+# File handling
+python-magic==0.4.27
+
+# Monitoring & Logging
+sentry-sdk[flask]==1.32.0
+
+# Rate limiting & caching
+Flask-Caching==2.1.0
+
+# Background job monitoring
+flower==2.0.1

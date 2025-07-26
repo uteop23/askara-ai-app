@@ -1,0 +1,13 @@
+# File rahasia
+.env
+
+# Folder virtual environment yang besar
+venv/
+
+# File sementara Python
+__pycache__/
+*.pyc
+
+# File log
+logs/
+*.log

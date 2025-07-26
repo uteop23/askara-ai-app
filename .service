@@ -1,0 +1,371 @@
+# ===============================================
+# ASKARAAI SYSTEMD SERVICE FILES
+# Save each section as separate .service files
+# ===============================================
+
+# ============= /etc/systemd/system/askaraai.service =============
+[Unit]
+Description=AskaraAI Flask Application
+Documentation=https://github.com/uteop23/askara-ai-app
+After=network.target mysql.service redis.service
+Wants=mysql.service redis.service
+Requires=network.target
+
+[Service]
+Type=notify
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/askaraai
+Environment="PATH=/var/www/askaraai/venv/bin"
+Environment="FLASK_ENV=production"
+Environment="PYTHONPATH=/var/www/askaraai"
+
+# Gunicorn configuration
+ExecStart=/var/www/askaraai/venv/bin/gunicorn \
+    --bind unix:/var/www/askaraai/askaraai.sock \
+    --workers 4 \
+    --worker-class sync \
+    --worker-connections 1000 \
+    --max-requests 10000 \
+    --max-requests-jitter 1000 \
+    --timeout 60 \
+    --keep-alive 2 \
+    --preload \
+    --enable-stdio-inheritance \
+    --log-level info \
+    --access-logfile /var/www/askaraai/logs/gunicorn_access.log \
+    --error-logfile /var/www/askaraai/logs/gunicorn_error.log \
+    --pid /var/www/askaraai/gunicorn.pid \
+    app:app
+
+# Process management
+ExecReload=/bin/kill -s HUP $MAINPID
+ExecStop=/bin/kill -s TERM $MAINPID
+PIDFile=/var/www/askaraai/gunicorn.pid
+
+# Restart policy
+Restart=always
+RestartSec=3
+StartLimitInterval=60s
+StartLimitBurst=3
+
+# Security settings
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/www/askaraai/static /var/www/askaraai/logs /tmp
+PrivateTmp=true
+PrivateDevices=true
+ProtectControlGroups=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+
+# Resource limits
+LimitNOFILE=65535
+LimitNPROC=4096
+
+# Environment protection
+ProtectHostname=true
+ProtectClock=true
+ProtectKernelLogs=true
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target
+
+# ============= /etc/systemd/system/askaraai-celery.service =============
+[Unit]
+Description=AskaraAI Celery Worker
+Documentation=https://docs.celeryproject.org/
+After=network.target redis.service mysql.service
+Wants=redis.service mysql.service
+Requires=network.target
+
+[Service]
+Type=forking
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/askaraai
+Environment="PATH=/var/www/askaraai/venv/bin"
+Environment="PYTHONPATH=/var/www/askaraai"
+Environment="C_FORCE_ROOT=1"
+
+# Celery worker configuration
+ExecStart=/var/www/askaraai/venv/bin/celery \
+    --app=celery_app.celery \
+    worker \
+    --loglevel=info \
+    --logfile=/var/www/askaraai/logs/celery_worker.log \
+    --pidfile=/var/www/askaraai/celery_worker.pid \
+    --concurrency=4 \
+    --max-tasks-per-child=1000 \
+    --max-memory-per-child=200000 \
+    --time-limit=3600 \
+    --soft-time-limit=3300 \
+    --queues=video_processing,maintenance,default \
+    --pool=prefork \
+    --detach
+
+# Process management
+ExecStop=/bin/kill -s TERM $MAINPID
+ExecReload=/bin/kill -s HUP $MAINPID
+PIDFile=/var/www/askaraai/celery_worker.pid
+
+# Restart policy
+Restart=always
+RestartSec=10
+StartLimitInterval=60s
+StartLimitBurst=3
+
+# Security settings
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/www/askaraai/static /var/www/askaraai/logs /tmp
+PrivateTmp=true
+PrivateDevices=true
+
+# Resource limits
+LimitNOFILE=65535
+LimitNPROC=4096
+MemoryMax=2G
+CPUQuota=200%
+
+[Install]
+WantedBy=multi-user.target
+
+# ============= /etc/systemd/system/askaraai-celery-beat.service =============
+[Unit]
+Description=AskaraAI Celery Beat Scheduler
+Documentation=https://docs.celeryproject.org/
+After=network.target redis.service mysql.service askaraai-celery.service
+Wants=redis.service mysql.service
+Requires=askaraai-celery.service
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/askaraai
+Environment="PATH=/var/www/askaraai/venv/bin"
+Environment="PYTHONPATH=/var/www/askaraai"
+
+# Celery beat configuration
+ExecStart=/var/www/askaraai/venv/bin/celery \
+    --app=celery_app.celery \
+    beat \
+    --loglevel=info \
+    --logfile=/var/www/askaraai/logs/celery_beat.log \
+    --pidfile=/var/www/askaraai/celery_beat.pid \
+    --schedule=/var/www/askaraai/celerybeat-schedule
+
+# Process management
+ExecStop=/bin/kill -s TERM $MAINPID
+PIDFile=/var/www/askaraai/celery_beat.pid
+
+# Restart policy
+Restart=always
+RestartSec=10
+StartLimitInterval=60s
+StartLimitBurst=3
+
+# Security settings
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/www/askaraai/logs /var/www/askaraai
+PrivateTmp=true
+PrivateDevices=true
+
+# Resource limits
+LimitNOFILE=4096
+LimitNPROC=256
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target
+
+# ============= /etc/systemd/system/askaraai-monitor.service =============
+[Unit]
+Description=AskaraAI System Monitor
+After=network.target askaraai.service
+Wants=askaraai.service
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/askaraai
+Environment="PATH=/var/www/askaraai/venv/bin"
+Environment="PYTHONPATH=/var/www/askaraai"
+
+# Monitor script
+ExecStart=/var/www/askaraai/venv/bin/python3 \
+    /var/www/askaraai/scripts/monitor.py
+
+# Restart policy
+Restart=always
+RestartSec=30
+StartLimitInterval=300s
+StartLimitBurst=5
+
+# Security settings
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/www/askaraai/logs
+PrivateTmp=true
+
+# Resource limits
+LimitNOFILE=1024
+LimitNPROC=64
+MemoryMax=256M
+
+[Install]
+WantedBy=multi-user.target
+
+# ============= /etc/systemd/system/askaraai-backup.service =============
+[Unit]
+Description=AskaraAI Backup Service (One-time)
+After=network.target mysql.service
+
+[Service]
+Type=oneshot
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/askaraai
+Environment="PATH=/var/www/askaraai/venv/bin"
+Environment="PYTHONPATH=/var/www/askaraai"
+
+# Backup script
+ExecStart=/var/www/askaraai/venv/bin/python3 \
+    /var/www/askaraai/backup_database.py
+
+# Security settings
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/www/askaraai/logs /tmp
+PrivateTmp=true
+
+# Resource limits
+LimitNOFILE=1024
+MemoryMax=512M
+
+# Timeout
+TimeoutStartSec=1800
+TimeoutStopSec=120
+
+[Install]
+WantedBy=multi-user.target
+
+# ============= /etc/systemd/system/askaraai-backup.timer =============
+[Unit]
+Description=AskaraAI Backup Timer (Every 26 days)
+Requires=askaraai-backup.service
+
+[Timer]
+OnCalendar=*-*-*/26 02:00:00
+Persistent=true
+RandomizedDelaySec=3600
+
+[Install]
+WantedBy=timers.target
+
+# ============= /etc/systemd/system/askaraai-health-check.service =============
+[Unit]
+Description=AskaraAI Health Check (One-time)
+After=network.target
+
+[Service]
+Type=oneshot
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/askaraai
+Environment="PATH=/var/www/askaraai/venv/bin"
+Environment="PYTHONPATH=/var/www/askaraai"
+
+# Health check script
+ExecStart=/var/www/askaraai/venv/bin/python3 \
+    /var/www/askaraai/utils.py health
+
+# Security settings
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/www/askaraai/logs
+PrivateTmp=true
+
+# Resource limits
+LimitNOFILE=1024
+MemoryMax=256M
+
+# Timeout
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target
+
+# ============= /etc/systemd/system/askaraai-health-check.timer =============
+[Unit]
+Description=AskaraAI Health Check Timer (Every 10 minutes)
+Requires=askaraai-health-check.service
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=10min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+
+# ===============================================
+# INSTALLATION COMMANDS
+# ===============================================
+
+# To install all services, run these commands:
+
+# 1. Create log directories
+# sudo mkdir -p /var/www/askaraai/logs
+# sudo chown www-data:www-data /var/www/askaraai/logs
+
+# 2. Copy service files
+# sudo cp askaraai.service /etc/systemd/system/
+# sudo cp askaraai-celery.service /etc/systemd/system/
+# sudo cp askaraai-celery-beat.service /etc/systemd/system/
+# sudo cp askaraai-monitor.service /etc/systemd/system/
+# sudo cp askaraai-backup.service /etc/systemd/system/
+# sudo cp askaraai-backup.timer /etc/systemd/system/
+# sudo cp askaraai-health-check.service /etc/systemd/system/
+# sudo cp askaraai-health-check.timer /etc/systemd/system/
+
+# 3. Reload systemd
+# sudo systemctl daemon-reload
+
+# 4. Enable services
+# sudo systemctl enable askaraai.service
+# sudo systemctl enable askaraai-celery.service
+# sudo systemctl enable askaraai-celery-beat.service
+# sudo systemctl enable askaraai-monitor.service
+# sudo systemctl enable askaraai-backup.timer
+# sudo systemctl enable askaraai-health-check.timer
+
+# 5. Start services
+# sudo systemctl start askaraai.service
+# sudo systemctl start askaraai-celery.service
+# sudo systemctl start askaraai-celery-beat.service
+# sudo systemctl start askaraai-monitor.service
+# sudo systemctl start askaraai-backup.timer
+# sudo systemctl start askaraai-health-check.timer
+
+# 6. Check status
+# sudo systemctl status askaraai
+# sudo systemctl status askaraai-celery
+# sudo systemctl status askaraai-celery-beat
+
+# 7. View logs
+# sudo journalctl -u askaraai -f
+# sudo journalctl -u askaraai-celery -f
+# sudo journalctl -u askaraai-celery-beat -f
