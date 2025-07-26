@@ -6,8 +6,8 @@ Flask-Login==0.6.3
 Flask-Mail==0.9.1
 Flask-Limiter==3.5.0
 Flask-CORS==4.0.0
-marshmallow==3.20.1
-flask-marshmallow==0.15.0
+Flask-WTF==1.1.1
+Flask-Caching==2.1.0
 
 # Database
 PyMySQL==1.1.0
@@ -49,17 +49,24 @@ python-dateutil==2.8.2
 pytz==2023.3
 validators==0.22.0
 
-# API & Webhooks
+# API & Validation
 marshmallow==3.20.1
+flask-marshmallow==0.15.0
 
-# File handling
+# File handling & validation
 python-magic==0.4.27
 
 # Monitoring & Logging
 sentry-sdk[flask]==1.32.0
+structlog==23.1.0
 
-# Rate limiting & caching
-Flask-Caching==2.1.0
+# System monitoring
+psutil==5.9.5
+
+# Testing (optional for development)
+pytest==7.4.2
+pytest-flask==1.2.0
+pytest-cov==4.1.0
 
 # Background job monitoring
 flower==2.0.1
