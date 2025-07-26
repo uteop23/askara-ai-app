@@ -1,9 +1,12 @@
-# celery_app.py - FIXED VERSION
-# Circular import diperbaiki dan error handling diperkuat
+# celery_app.py - MEMORY OPTIMIZED VERSION
+# Enhanced dengan memory management, performance optimizations, dan better error handling
 
 import os
 import json
 import logging
+import gc
+import tempfile
+import shutil
 from datetime import datetime, timedelta
 from celery import Celery
 from dotenv import load_dotenv
@@ -13,16 +16,30 @@ import moviepy.editor as mp
 import google.generativeai as genai
 from moviepy.video.fx import resize
 import subprocess
-import tempfile
-import shutil
 from pathlib import Path
 import traceback
 import secrets
+import psutil
+import structlog
 
 # Load environment variables
 load_dotenv()
 
-# Configure logging
+# Configure structured logging
+structlog.configure(
+    processors=[
+        structlog.contextvars.merge_contextvars,
+        structlog.processors.add_log_level,
+        structlog.processors.StackInfoRenderer(),
+        structlog.dev.ConsoleRenderer()
+    ],
+    wrapper_class=structlog.make_filtering_bound_logger(logging.INFO),
+    logger_factory=structlog.WriteLoggerFactory(),
+    cache_logger_on_first_use=True,
+)
+logger = structlog.get_logger()
+
+# Configure basic logging as fallback
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -31,12 +48,11 @@ logging.basicConfig(
         logging.StreamHandler()
     ]
 )
-logger = logging.getLogger(__name__)
 
 # Create Celery instance
 celery = Celery('askaraai')
 
-# Celery configuration
+# Enhanced Celery configuration
 celery.conf.update(
     broker_url=os.getenv('REDIS_URL', 'redis://localhost:6379/0'),
     result_backend=os.getenv('REDIS_URL', 'redis://localhost:6379/0'),
@@ -56,6 +72,11 @@ celery.conf.update(
     task_reject_on_worker_lost=True,
     task_acks_late=True,
     worker_prefetch_multiplier=1,
+    # Enhanced memory management
+    worker_max_tasks_per_child=100,
+    worker_max_memory_per_child=2048000,  # 2GB
+    task_soft_time_limit=3600,  # 1 hour
+    task_time_limit=4200,  # 70 minutes
 )
 
 # Configure Gemini AI with error handling
@@ -69,7 +90,7 @@ try:
 except Exception as e:
     logger.error(f"❌ Failed to configure Gemini AI: {str(e)}")
 
-# Redis client dengan error handling
+# Redis client with error handling
 try:
     redis_client = redis.from_url(os.getenv('REDIS_URL', 'redis://localhost:6379/0'))
     redis_client.ping()
@@ -78,16 +99,42 @@ except Exception as e:
     logger.error(f"❌ Redis connection failed: {str(e)}")
     redis_client = None
 
-# ===== HELPER FUNCTION TO GET DB AND MODELS (SOLUSI CIRCULAR IMPORT) =====
+# ===== MEMORY MANAGEMENT UTILITIES =====
+class MemoryMonitor:
+    def __init__(self, max_memory_mb=2048):
+        self.max_memory_mb = max_memory_mb
+        self.process = psutil.Process()
+    
+    def check_memory(self):
+        """Check current memory usage"""
+        memory_info = self.process.memory_info()
+        memory_mb = memory_info.rss / 1024 / 1024
+        
+        logger.info("Memory check", memory_mb=round(memory_mb, 2))
+        
+        if memory_mb > self.max_memory_mb:
+            gc.collect()  # Force garbage collection
+            
+            # Check again after GC
+            memory_info = self.process.memory_info()
+            memory_mb = memory_info.rss / 1024 / 1024
+            
+            if memory_mb > self.max_memory_mb:
+                raise MemoryError(f"Memory usage too high: {memory_mb:.2f}MB > {self.max_memory_mb}MB")
+        
+        return memory_mb
+    
+    def cleanup_memory(self):
+        """Force cleanup memory"""
+        gc.collect()
+        logger.info("Memory cleanup completed")
+
+# ===== HELPER FUNCTION TO GET DB AND MODELS =====
 def get_app_and_models():
     """Lazy import untuk menghindari circular import"""
     try:
-        # Import Flask app untuk context
         from app import app
-        
-        # Import models dari file terpisah
         from app_models import db, User, VideoProcess, VideoClip
-        
         return app, db, User, VideoProcess, VideoClip
     except Exception as e:
         logger.error(f"Failed to import app and models: {str(e)}")
@@ -96,6 +143,7 @@ def get_app_and_models():
 class VideoProcessor:
     def __init__(self):
         self.temp_dir = None
+        self.memory_monitor = MemoryMonitor()
         try:
             self.gemini_model = genai.GenerativeModel('gemini-pro')
             logger.info("✅ Gemini model initialized")
@@ -114,25 +162,31 @@ class VideoProcessor:
             raise
     
     def cleanup_temp_directory(self):
-        """Clean up temporary directory"""
+        """Clean up temporary directory and force memory cleanup"""
         if self.temp_dir and os.path.exists(self.temp_dir):
             try:
                 shutil.rmtree(self.temp_dir, ignore_errors=True)
                 logger.info(f"✅ Temporary directory cleaned: {self.temp_dir}")
             except Exception as e:
                 logger.warning(f"⚠️ Failed to cleanup temp directory: {str(e)}")
+        
+        # Force memory cleanup
+        self.memory_monitor.cleanup_memory()
     
     def download_youtube_video(self, url):
-        """Download YouTube video with robust error handling"""
+        """Download YouTube video with enhanced memory management"""
         try:
             logger.info(f"🔄 Starting download from: {url}")
+            
+            # Check memory before starting
+            self.memory_monitor.check_memory()
             
             # Validate URL first
             if not any(domain in url for domain in ['youtube.com', 'youtu.be']):
                 raise ValueError("Invalid YouTube URL")
             
             ydl_opts = {
-                'format': 'best[height<=720]/best',
+                'format': 'best[height<=720][filesize<500M]/best[height<=480]',  # Limit resolution and size
                 'outtmpl': os.path.join(self.temp_dir, 'video.%(ext)s'),
                 'quiet': True,
                 'no_warnings': True,
@@ -148,12 +202,17 @@ class VideoProcessor:
                     info = ydl.extract_info(url, download=False)
                     title = info.get('title', 'Unknown Title')
                     duration = info.get('duration', 0)
+                    filesize = info.get('filesize') or info.get('filesize_approx', 0)
                     
-                    logger.info(f"📹 Video info: {title} ({duration}s)")
+                    logger.info(f"📹 Video info: {title} ({duration}s, ~{filesize//1024//1024 if filesize else 'unknown'}MB)")
                     
                     # Check video duration (max 3 hours)
-                    if duration and duration > 10800:  # 3 hours
+                    if duration and duration > 10800:
                         raise Exception("Video too long. Maximum duration is 3 hours.")
+                    
+                    # Check file size if available
+                    if filesize and filesize > 500 * 1024 * 1024:  # 500MB
+                        raise Exception("Video file too large. Maximum size is 500MB.")
                     
                     # Check if video is available
                     if info.get('is_live'):
@@ -167,6 +226,10 @@ class VideoProcessor:
                 try:
                     ydl.download([url])
                     logger.info("✅ Video download completed")
+                    
+                    # Check memory after download
+                    self.memory_monitor.check_memory()
+                    
                 except Exception as e:
                     logger.error(f"❌ Download failed: {str(e)}")
                     raise Exception(f"Failed to download video: {str(e)}")
@@ -186,12 +249,15 @@ class VideoProcessor:
                 if file_size < 1024:  # Less than 1KB
                     raise Exception("Downloaded file is too small, likely corrupted")
                 
-                logger.info(f"✅ Video file ready: {video_file} ({file_size} bytes)")
+                if file_size > 500 * 1024 * 1024:  # 500MB
+                    raise Exception("Downloaded file is too large")
+                
+                logger.info(f"✅ Video file ready: {video_file} ({file_size // 1024 // 1024}MB)")
                 
                 return {
                     'video_file': video_file,
                     'title': title,
-                    'duration': duration or 60  # Default duration if not available
+                    'duration': duration or 60
                 }
                 
         except Exception as e:
@@ -199,15 +265,18 @@ class VideoProcessor:
             raise Exception(f"Failed to download video: {str(e)}")
     
     def extract_audio_transcript(self, video_file):
-        """Extract audio and generate transcript using FFmpeg"""
+        """Extract audio with memory-efficient approach"""
         try:
             logger.info("🔄 Extracting audio for transcript...")
+            
+            # Check memory before audio extraction
+            self.memory_monitor.check_memory()
             
             # Verify input file exists
             if not os.path.exists(video_file):
                 raise Exception("Video file not found")
             
-            # Extract audio using FFmpeg
+            # Extract audio using FFmpeg with memory-efficient settings
             audio_file = os.path.join(self.temp_dir, 'audio.wav')
             
             cmd = [
@@ -216,22 +285,26 @@ class VideoProcessor:
                 '-acodec', 'pcm_s16le',  # Audio codec
                 '-ar', '16000',  # Sample rate
                 '-ac', '1',  # Mono
+                '-t', '300',  # Limit to 5 minutes for transcript
                 '-y',  # Overwrite
-                '-loglevel', 'error',  # Reduce FFmpeg output
+                '-loglevel', 'error',
                 audio_file
             ]
             
             try:
                 result = subprocess.run(cmd, check=True, capture_output=True, timeout=300)
                 logger.info("✅ Audio extraction completed")
+                
+                # Check memory after audio extraction
+                self.memory_monitor.check_memory()
+                
             except subprocess.TimeoutExpired:
                 raise Exception("Audio extraction timed out")
             except subprocess.CalledProcessError as e:
                 logger.error(f"FFmpeg error: {e.stderr.decode()}")
-                # Continue with placeholder transcript instead of failing
                 logger.warning("⚠️ Audio extraction failed, using placeholder transcript")
             
-            # Create transcript placeholder
+            # Create transcript placeholder (since we don't have speech-to-text API)
             transcript = f"Audio content extracted from video. Video appears to contain valuable content suitable for clipping based on duration and file analysis."
             
             logger.info("✅ Transcript generation completed")
@@ -242,9 +315,12 @@ class VideoProcessor:
             return f"Transcript unavailable: {str(e)}"
     
     def analyze_content_with_gemini(self, title, transcript, duration):
-        """Analyze video content using Gemini AI with robust error handling"""
+        """Analyze content with memory monitoring"""
         try:
             logger.info("🔄 Analyzing content with Gemini AI...")
+            
+            # Check memory before AI processing
+            self.memory_monitor.check_memory()
             
             if not self.gemini_model:
                 logger.warning("⚠️ Gemini model not available, using fallback")
@@ -297,9 +373,11 @@ class VideoProcessor:
                 
                 logger.info("✅ Gemini response received")
                 
+                # Check memory after AI processing
+                self.memory_monitor.check_memory()
+                
                 # Try to parse JSON response
                 try:
-                    # Clean response text
                     response_text = response.text.strip()
                     
                     # Remove markdown code blocks if present
@@ -314,11 +392,10 @@ class VideoProcessor:
                     if 'clips' not in result or not isinstance(result['clips'], list):
                         raise ValueError("Invalid clips format")
                     
-                    # Validate clips data
+                    # Validate clips data and limit to max 8 clips for memory efficiency
                     valid_clips = []
-                    for clip in result['clips']:
+                    for clip in result['clips'][:8]:  # Limit to 8 clips max
                         if all(key in clip for key in ['title', 'start_time', 'end_time', 'viral_score']):
-                            # Ensure clip times are within video duration
                             start_time = max(0, min(float(clip['start_time']), duration - 10))
                             end_time = min(float(clip['end_time']), duration)
                             
@@ -328,7 +405,7 @@ class VideoProcessor:
                                 valid_clips.append(clip)
                     
                     if valid_clips:
-                        result['clips'] = valid_clips[:10]  # Max 10 clips
+                        result['clips'] = valid_clips
                         logger.info(f"✅ Parsed {len(valid_clips)} valid clips from Gemini")
                         return result
                     else:
@@ -336,7 +413,6 @@ class VideoProcessor:
                         
                 except (json.JSONDecodeError, ValueError) as e:
                     logger.warning(f"⚠️ Failed to parse Gemini response: {str(e)}")
-                    logger.info("📝 Creating fallback analysis...")
                     return self.create_fallback_analysis(title, duration)
                 
             except Exception as e:
@@ -351,15 +427,15 @@ class VideoProcessor:
         """Create fallback analysis when Gemini fails"""
         logger.info("🔄 Creating fallback analysis...")
         
-        # Create clips every 60-90 seconds
+        # Create clips every 60-90 seconds, max 6 clips for memory efficiency
         clips = []
-        num_clips = min(8, max(3, int(duration // 60)))
+        num_clips = min(6, max(3, int(duration // 60)))
         
         segment_duration = duration / num_clips
         
         for i in range(num_clips):
             start_time = i * segment_duration
-            clip_duration = min(60, segment_duration * 0.8)  # 80% of segment or 60s max
+            clip_duration = min(60, segment_duration * 0.8)
             end_time = min(start_time + clip_duration, duration)
             
             # Skip if clip would be too short
@@ -370,29 +446,17 @@ class VideoProcessor:
                 "title": f"Momen Menarik #{i+1} - {title[:30]}",
                 "start_time": round(start_time, 1),
                 "end_time": round(end_time, 1),
-                "viral_score": max(5.0, 9.0 - (i * 0.5)),  # Decreasing viral score
+                "viral_score": max(5.0, 9.0 - (i * 0.5)),
                 "reason": "Segmen yang dipilih berdasarkan analisis durasi dan konten"
             })
         
-        # Create blog article
+        # Create simplified blog article
         blog_article = f"""
         <h1>{title} - Analisis Konten Video</h1>
         <p>Video ini berisi konten berkualitas dengan durasi {duration} detik. Tim AI kami telah menganalisis dan mengidentifikasi {len(clips)} momen yang berpotensi viral.</p>
         
         <h2>Highlights Video</h2>
         <p>Setiap klip telah dipilih berdasarkan potensi engagement dan kualitas konten. Video original menampilkan informasi berharga yang dapat menarik perhatian audiens target.</p>
-        
-        <h2>Strategi Konten untuk Media Sosial</h2>
-        <p>Untuk memaksimalkan reach di media sosial:</p>
-        <ul>
-            <li>Gunakan hook yang kuat di 3 detik pertama setiap klip</li>
-            <li>Tambahkan caption yang engaging dan ajukan pertanyaan</li>
-            <li>Post di waktu prime time untuk reach maksimal</li>
-            <li>Gunakan hashtag yang relevan dengan niche Anda</li>
-        </ul>
-        
-        <h2>Tips Optimasi</h2>
-        <p>Setiap klip dapat dioptimalkan lebih lanjut dengan menambahkan subtitle, musik background, dan visual elements yang menarik perhatian.</p>
         """
         
         # Create carousel posts
@@ -400,8 +464,7 @@ class VideoProcessor:
             f"🎬 Thread: {title[:50]}... - Insights penting dari video ini!",
             "💡 Tip #1: Konten berkualitas dimulai dari pemilihan momen yang tepat",
             "🚀 Tip #2: Setiap klip harus memiliki nilai tersendiri untuk audiens",
-            "📈 Tip #3: Konsistensi posting lebih penting daripada perfeksi",
-            "✨ Kesimpulan: Dengan tools AI yang tepat, satu video bisa jadi 10+ konten!"
+            "✨ Kesimpulan: Dengan tools AI yang tepat, satu video bisa jadi banyak konten!"
         ]
         
         logger.info(f"✅ Fallback analysis created with {len(clips)} clips")
@@ -413,9 +476,12 @@ class VideoProcessor:
         }
     
     def create_clips(self, video_file, clips_data):
-        """Create video clips from the original video with enhanced error handling"""
+        """Create video clips with enhanced memory management"""
         try:
             logger.info(f"🔄 Creating {len(clips_data)} clips from video...")
+            
+            # Check memory before starting
+            self.memory_monitor.check_memory()
             
             # Verify input file
             if not os.path.exists(video_file):
@@ -434,9 +500,13 @@ class VideoProcessor:
             clips_dir = '/var/www/askaraai/static/clips'
             os.makedirs(clips_dir, exist_ok=True)
             
+            # Process clips one by one to manage memory
             for i, clip_data in enumerate(clips_data):
                 try:
                     logger.info(f"🔄 Processing clip {i+1}/{len(clips_data)}: {clip_data.get('title', 'Untitled')}")
+                    
+                    # Check memory before each clip
+                    self.memory_monitor.check_memory()
                     
                     start_time = max(0, float(clip_data.get('start_time', 0)))
                     end_time = min(float(clip_data.get('end_time', 60)), video.duration)
@@ -446,7 +516,7 @@ class VideoProcessor:
                         logger.warning(f"⚠️ Invalid time range for clip {i+1}, skipping")
                         continue
                     
-                    if end_time - start_time < 10:  # Minimum 10 seconds
+                    if end_time - start_time < 10:
                         logger.warning(f"⚠️ Clip {i+1} too short ({end_time - start_time}s), skipping")
                         continue
                     
@@ -458,24 +528,28 @@ class VideoProcessor:
                         logger.error(f"❌ Failed to extract clip {i+1}: {str(e)}")
                         continue
                     
-                    # Resize to vertical format (9:16) with better error handling
+                    # Resize to vertical format with memory optimization
                     try:
-                        target_height = 1920
-                        target_width = 1080
+                        target_height = 1280  # Reduced from 1920 for memory efficiency
+                        target_width = 720    # Reduced from 1080 for memory efficiency
                         
-                        # Calculate scaling to fit height
                         if clip.h > 0:
                             scale_factor = target_height / clip.h
                             clip_resized = clip.resize(scale_factor)
                             
+                            # Check memory after resize
+                            self.memory_monitor.check_memory()
+                            
                             # Crop to 9:16 if too wide
                             if clip_resized.w > target_width:
                                 x_center = clip_resized.w / 2
-                                clip_resized = clip_resized.crop(x_center=x_center, width=target_width)
+                                clip_resized_cropped = clip_resized.crop(x_center=x_center, width=target_width)
+                                clip_resized.close()  # Free memory
+                                clip_resized = clip_resized_cropped
                             
-                            # Ensure exact size
+                            # Final resize
                             clip_final = clip_resized.resize((target_width, target_height))
-                            
+                            clip_resized.close()  # Free memory
                         else:
                             raise Exception("Invalid video dimensions")
                         
@@ -483,32 +557,37 @@ class VideoProcessor:
                         
                     except Exception as e:
                         logger.error(f"❌ Failed to resize clip {i+1}: {str(e)}")
-                        clip.close()
+                        try:
+                            clip.close()
+                        except:
+                            pass
                         continue
                     
                     # Generate safe filename
                     safe_title = "".join(c for c in str(clip_data.get('title', f'clip_{i+1}')) 
-                                       if c.isalnum() or c in (' ', '-', '_')).strip()[:50]
+                                       if c.isalnum() or c in (' ', '-', '_')).strip()[:30]
                     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                     filename = f"clip_{i+1}_{timestamp}_{safe_title}.mp4".replace(' ', '_')
                     output_path = os.path.join(clips_dir, filename)
                     
-                    # Write clip with robust error handling
+                    # Write clip with optimized settings
                     try:
                         clip_final.write_videofile(
                             output_path,
                             codec='libx264',
                             audio_codec='aac',
-                            bitrate='2000k',
-                            fps=24,  # Consistent framerate
+                            bitrate='1500k',  # Reduced bitrate for smaller files
+                            fps=24,
                             verbose=False,
                             logger=None,
-                            temp_audiofile_path=os.path.join(self.temp_dir, f'temp_audio_{i}.m4a')
+                            temp_audiofile_path=os.path.join(self.temp_dir, f'temp_audio_{i}.m4a'),
+                            preset='fast'  # Faster encoding
                         )
                         
                         # Verify output file
                         if os.path.exists(output_path) and os.path.getsize(output_path) > 1024:
-                            logger.info(f"✅ Clip saved: {filename} ({os.path.getsize(output_path)} bytes)")
+                            file_size_mb = os.path.getsize(output_path) // 1024 // 1024
+                            logger.info(f"✅ Clip saved: {filename} ({file_size_mb}MB)")
                             
                             created_clips.append({
                                 'filename': filename,
@@ -524,11 +603,11 @@ class VideoProcessor:
                     except Exception as e:
                         logger.error(f"❌ Failed to write clip {i+1}: {str(e)}")
                     
-                    # Clean up clip objects
+                    # Clean up clip objects and force garbage collection
                     try:
                         clip.close()
-                        clip_resized.close()
                         clip_final.close()
+                        gc.collect()  # Force garbage collection after each clip
                     except:
                         pass
                     
@@ -539,6 +618,7 @@ class VideoProcessor:
             # Clean up main video
             try:
                 video.close()
+                gc.collect()  # Final garbage collection
             except:
                 pass
             
@@ -551,12 +631,15 @@ class VideoProcessor:
 
 @celery.task(bind=True)
 def process_video_task(self, process_id, youtube_url):
-    """Main task for processing YouTube videos with comprehensive error handling"""
+    """Main task for processing YouTube videos with memory optimization"""
     app, db, User, VideoProcess, VideoClip = get_app_and_models()
     
     with app.app_context():
+        processor = None
         try:
-            logger.info(f"🚀 Starting video processing task for process_id: {process_id}")
+            logger.info(f"🚀 Starting video processing task", 
+                       process_id=process_id, 
+                       url=youtube_url)
             
             # Update task status
             self.update_state(
@@ -574,7 +657,7 @@ def process_video_task(self, process_id, youtube_url):
                 if not user:
                     raise Exception("User not found")
                     
-                logger.info(f"📋 Processing for user: {user.email}")
+                logger.info(f"📋 Processing for user", user_email=user.email)
                 
             except Exception as e:
                 logger.error(f"❌ Database lookup error: {str(e)}")
@@ -619,7 +702,7 @@ def process_video_task(self, process_id, youtube_url):
                 video_process.status = 'processing'
                 db.session.commit()
                 
-                logger.info(f"✅ Download completed: {title}")
+                logger.info(f"✅ Download completed", title=title, duration=duration)
                 
                 # Update status and extract transcript
                 self.update_state(
@@ -688,7 +771,7 @@ def process_video_task(self, process_id, youtube_url):
                 
                 db.session.commit()
                 
-                logger.info(f"✅ Video processing completed successfully: {len(created_clips)} clips created")
+                logger.info(f"✅ Video processing completed successfully", clips_created=len(created_clips))
                 
                 return {
                     'original_title': title,
@@ -698,16 +781,13 @@ def process_video_task(self, process_id, youtube_url):
                 }
                 
             finally:
-                # Always cleanup temp directory
-                try:
+                # Always cleanup temp directory and memory
+                if processor:
                     processor.cleanup_temp_directory()
-                except Exception as e:
-                    logger.warning(f"⚠️ Cleanup warning: {str(e)}")
                 
         except Exception as e:
             error_msg = str(e)
-            logger.error(f"❌ Video processing failed: {error_msg}")
-            logger.error(f"📄 Traceback: {traceback.format_exc()}")
+            logger.error(f"❌ Video processing failed", error=error_msg)
             
             # Update database with error
             try:
@@ -720,12 +800,16 @@ def process_video_task(self, process_id, youtube_url):
             except Exception as db_error:
                 logger.error(f"❌ Failed to save error to database: {str(db_error)}")
             
+            # Cleanup on error
+            if processor:
+                processor.cleanup_temp_directory()
+            
             # Re-raise the exception for Celery
             raise Exception(error_msg)
 
 @celery.task
 def backup_database_task():
-    """Backup database to Google Drive every 26 days with enhanced error handling"""
+    """Backup database to Google Drive every 26 days"""
     try:
         logger.info("💾 Starting database backup...")
         
@@ -798,7 +882,7 @@ from celery.schedules import crontab
 celery.conf.beat_schedule = {
     'backup-database': {
         'task': 'celery_app.backup_database_task',
-        'schedule': crontab(day_of_month='*/26', hour=2, minute=0),  # Every 26 days at 2 AM
+        'schedule': crontab(day_of_month='*/26', hour=2, minute=0),
     },
 }
 
