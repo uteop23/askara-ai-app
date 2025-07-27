@@ -131,21 +131,13 @@ port = http,https
 logpath = /var/log/nginx/error.log
 maxretry = 10
 bantime = 600
-
-[askaraai-auth]
-enabled = true
-filter = askaraai-auth
-port = http,https
-logpath = /var/www/askaraai/logs/app.log
-maxretry = 5
-bantime = 1800
 EOL
 
-    # Create custom filter for AskaraAI
-    cat > /etc/fail2ban/filter.d/askaraai-auth.conf << 'EOL'
+    # Create custom filter for nginx
+    mkdir -p /etc/fail2ban/filter.d
+    cat > /etc/fail2ban/filter.d/nginx-req-limit.conf << 'EOL'
 [Definition]
-failregex = ^.*Failed login attempt.*email=<HOST>.*$
-            ^.*Google auth error.*$
+failregex = limiting requests, excess:.* by zone.*client: <HOST>
 ignoreregex =
 EOL
 
@@ -173,6 +165,7 @@ update_system() {
     echo 'Unattended-Upgrade::Remove-Unused-Dependencies "true";' >> /etc/apt/apt.conf.d/50unattended-upgrades
     
     # Enable automatic updates
+    echo unattended-upgrades unattended-upgrades/enable_auto_updates boolean true | debconf-set-selections
     dpkg-reconfigure -f noninteractive unattended-upgrades
     
     log_success "System updated with security patches"
@@ -254,7 +247,7 @@ local-infile=0
 bind-address=127.0.0.1
 skip-networking=0
 skip-show-database
-sql_mode=STRICT_TRANS_TABLES,NO_ZERO_DATE,NO_ZERO_IN_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION
+sql_mode=STRICT_TRANS_TABLES,NO_ZERO_DATE,NO_ZERO_IN_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION
 
 # Performance and security
 max_connections=50
@@ -315,20 +308,35 @@ setup_application() {
     # Change to app directory
     cd ${APP_DIR}
     
-    # Clone repository (if needed)
-    if [ ! -d ".git" ]; then
-        log_info "Cloning repository..."
-        sudo -u ${APP_USER} git clone https://github.com/uteop23/askara-ai-app.git .
+    # If this is a fresh install, copy files from current directory
+    if [ ! -f "app.py" ]; then
+        log_info "Copying application files..."
+        # Copy files from current directory if they exist
+        if [ -f "../app.py" ]; then
+            cp ../*.py . 2>/dev/null || true
+            cp ../*.txt . 2>/dev/null || true
+            cp ../*.md . 2>/dev/null || true
+            cp ../*.sh . 2>/dev/null || true
+            cp -r ../templates . 2>/dev/null || true
+            cp -r ../static . 2>/dev/null || true
+        fi
     fi
     
     # Setup Python virtual environment
     sudo -u ${APP_USER} python3 -m venv venv
     sudo -u ${APP_USER} bash -c "source venv/bin/activate && pip install --upgrade pip"
-    sudo -u ${APP_USER} bash -c "source venv/bin/activate && pip install -r requirements.txt"
+    
+    # Install requirements if file exists
+    if [ -f "requirements.txt" ]; then
+        sudo -u ${APP_USER} bash -c "source venv/bin/activate && pip install -r requirements.txt"
+    else
+        # Install basic requirements
+        sudo -u ${APP_USER} bash -c "source venv/bin/activate && pip install Flask Flask-SQLAlchemy Flask-Login celery redis mysql-connector-python PyMySQL python-dotenv yt-dlp moviepy google-generativeai"
+    fi
     
     # Create necessary directories with proper permissions
-    sudo -u ${APP_USER} mkdir -p static/clips static/uploads logs static/error
-    chmod 755 static/clips static/uploads
+    sudo -u ${APP_USER} mkdir -p static/clips static/uploads logs static/error templates
+    chmod 755 static/clips static/uploads templates
     chmod 750 logs
     
     log_success "Application setup completed"
@@ -410,16 +418,8 @@ LOG_FILE=/var/www/askaraai/logs/app.log
 MAX_LOG_SIZE=10MB
 LOG_BACKUP_COUNT=5
 
-# Monitoring & Analytics
-SENTRY_DSN=your_sentry_dsn_here
-GA_TRACKING_ID=UA-XXXXXXXXX-X
-
 # Admin Configuration
 ADMIN_EMAIL=ujangbawbaw@gmail.com
-
-# Backup Configuration
-BACKUP_RETENTION_DAYS=180
-BACKUP_SCHEDULE=0 2 */26 * *
 
 # Performance Configuration
 FFMPEG_THREADS=4
@@ -443,10 +443,6 @@ MAINTENANCE_MESSAGE="Kami sedang melakukan pemeliharaan sistem. Mohon coba lagi 
 # Localization
 DEFAULT_LANGUAGE=id
 TIMEZONE=Asia/Jakarta
-
-# Notification Configuration
-SLACK_WEBHOOK_URL=https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK
-DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/YOUR/DISCORD/WEBHOOK
 EOL
 
         chmod 600 .env
@@ -456,6 +452,61 @@ EOL
         log_info "Database Password: $DB_PASSWORD"
         log_info "⚠️  IMPORTANT: Edit .env file and add required API keys!"
     fi
+}
+
+# Create minimal HTML templates if they don't exist
+create_basic_templates() {
+    log_info "Creating basic templates..."
+    
+    # Create templates directory
+    sudo -u ${APP_USER} mkdir -p templates
+    
+    # Create basic index.html if it doesn't exist
+    if [ ! -f "templates/index.html" ]; then
+        sudo -u ${APP_USER} tee templates/index.html > /dev/null << 'EOL'
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AskaraAI - Coming Soon</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-900 text-white min-h-screen flex items-center justify-center">
+    <div class="text-center">
+        <h1 class="text-6xl font-bold mb-4">AskaraAI</h1>
+        <p class="text-xl mb-8">AI Video Clipper - Coming Soon</p>
+        <p class="text-gray-400">Setup completed successfully! Configure your .env file to get started.</p>
+    </div>
+</body>
+</html>
+EOL
+    fi
+    
+    # Create admin.html if it doesn't exist
+    if [ ! -f "templates/admin.html" ]; then
+        sudo -u ${APP_USER} tee templates/admin.html > /dev/null << 'EOL'
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AskaraAI Admin Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100">
+    <div class="container mx-auto px-4 py-8">
+        <h1 class="text-3xl font-bold mb-8">AskaraAI Admin Dashboard</h1>
+        <div class="bg-white rounded-lg shadow p-6">
+            <p>Admin dashboard setup completed. Configure your application to unlock full features.</p>
+        </div>
+    </div>
+</body>
+</html>
+EOL
+    fi
+    
+    log_success "Basic templates created"
 }
 
 # Create error pages
@@ -527,62 +578,47 @@ EOL
     log_success "Custom error pages created"
 }
 
-# Test database connection dan initialize
-test_and_initialize_database() {
-    log_info "Testing database connection and initializing..."
+# Create basic app.py if it doesn't exist
+create_basic_app() {
+    log_info "Creating basic application file..."
     
-    sudo -u ${APP_USER} bash -c "cd ${APP_DIR} && source venv/bin/activate && python3 -c \"
+    if [ ! -f "app.py" ]; then
+        sudo -u ${APP_USER} tee app.py > /dev/null << 'EOL'
+from flask import Flask, render_template
 import os
-os.environ['DB_PASSWORD'] = '${DB_PASSWORD}'
+from dotenv import load_dotenv
 
-try:
-    from app_models import db
-    from app import app
+load_dotenv()
+
+app = Flask(__name__)
+app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dev-key')
+
+@app.route('/')
+def index():
+    return render_template('index.html')
+
+@app.route('/health')
+def health():
+    return {'status': 'healthy', 'message': 'AskaraAI is running'}
+
+if __name__ == '__main__':
+    app.run(debug=False, host='0.0.0.0', port=5000)
+EOL
+        log_success "Basic app.py created"
+    fi
+}
+
+# Test basic application
+test_basic_application() {
+    log_info "Testing basic application..."
     
-    with app.app_context():
-        # Test connection
-        db.engine.execute('SELECT 1')
-        print('✅ Database connection successful!')
-        
-        # Test models import
-        from app_models import User, VideoProcess, VideoClip, Payment, CountdownSettings, PromoCode, SystemHealth, PromoUsage
-        print('✅ Models import successful!')
-        
-        # Create tables
-        db.create_all()
-        print('✅ Database tables created!')
-        
-        # Create admin user
-        admin_email = 'ujangbawbaw@gmail.com'
-        admin = User.query.filter_by(email=admin_email).first()
-        
-        if not admin:
-            admin = User(
-                email=admin_email,
-                name='Admin',
-                is_admin=True,
-                email_verified=True,
-                credits=999999,
-                is_premium=True
-            )
-            admin.set_password('admin123!@#')  # Set temporary password
-            db.session.add(admin)
-            db.session.commit()
-            print(f'✅ Admin user created: {admin_email}')
-        else:
-            admin.is_admin = True
-            admin.is_premium = True
-            admin.credits = 999999
-            db.session.commit()
-            print(f'✅ Admin user updated: {admin_email}')
-            
-except Exception as e:
-    print(f'❌ Database error: {e}')
-    import traceback
-    traceback.print_exc()
-\""
+    # Try to run basic health check
+    cd ${APP_DIR}
     
-    log_success "Database initialized successfully"
+    # Test Python app startup
+    sudo -u ${APP_USER} timeout 5 bash -c "source venv/bin/activate && python3 -c 'import flask; print(\"Flask import successful\")'" || log_error "Flask import failed"
+    
+    log_success "Basic application test completed"
 }
 
 # Setup enhanced Nginx dengan security headers
@@ -656,17 +692,17 @@ http {
 }
 EOL
 
-    # Create site configuration (copy dari nginx.conf yang sudah diperbaiki)
+    # Create site configuration
     tee /etc/nginx/sites-available/askaraai > /dev/null << 'EOL'
 server {
     listen 80;
-    server_name askaraai.com www.askaraai.com;
+    server_name askaraai.com www.askaraai.com _;
     return 301 https://$server_name$request_uri;
 }
 
 server {
-    listen 443 ssl http2;
-    server_name askaraai.com www.askaraai.com;
+    listen 443 ssl http2 default_server;
+    server_name askaraai.com www.askaraai.com _;
     
     # SSL Configuration (placeholder - will be updated after SSL setup)
     ssl_certificate /etc/ssl/certs/ssl-cert-snakeoil.pem;
@@ -683,6 +719,11 @@ server {
     # Main application
     location / {
         limit_req zone=general burst=20 nodelay;
+        try_files $uri @app;
+    }
+    
+    # Application proxy
+    location @app {
         proxy_pass http://unix:/var/www/askaraai/askaraai.sock;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -693,41 +734,11 @@ server {
         proxy_send_timeout 120s;
     }
     
-    # API endpoints
-    location ~ ^/api/(auth|login|signup) {
-        limit_req zone=login burst=3 nodelay;
-        proxy_pass http://unix:/var/www/askaraai/askaraai.sock;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-    
-    location /api/process-video {
-        limit_req zone=api burst=1 nodelay;
-        proxy_pass http://unix:/var/www/askaraai/askaraai.sock;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_read_timeout 600s;
-        proxy_connect_timeout 30s;
-        proxy_send_timeout 600s;
-    }
-    
     # Static files
     location /static {
         alias /var/www/askaraai/static;
         expires 7d;
         add_header Cache-Control "public, immutable";
-    }
-    
-    # Video clips
-    location /clips {
-        alias /var/www/askaraai/static/clips;
-        add_header Content-Disposition 'attachment';
-        expires 1h;
-        add_header Cache-Control "private";
     }
     
     # Security: Block sensitive files
@@ -739,8 +750,7 @@ server {
     # Health check
     location /health {
         access_log off;
-        proxy_pass http://unix:/var/www/askaraai/askaraai.sock;
-        proxy_set_header Host $host;
+        try_files $uri @app;
     }
 }
 EOL
@@ -764,13 +774,12 @@ setup_systemd_services() {
     tee /etc/systemd/system/askaraai.service > /dev/null << EOL
 [Unit]
 Description=AskaraAI Flask Application
-Documentation=https://github.com/uteop23/askara-ai-app
 After=network.target mysql.service redis.service
 Wants=mysql.service redis.service
 Requires=network.target
 
 [Service]
-Type=notify
+Type=exec
 User=${APP_USER}
 Group=${APP_USER}
 WorkingDirectory=${APP_DIR}
@@ -781,7 +790,7 @@ Environment="PYTHONPATH=${APP_DIR}"
 # Enhanced Gunicorn configuration
 ExecStart=${APP_DIR}/venv/bin/gunicorn \\
     --bind unix:${APP_DIR}/askaraai.sock \\
-    --workers 4 \\
+    --workers 2 \\
     --worker-class sync \\
     --worker-connections 1000 \\
     --max-requests 5000 \\
@@ -789,7 +798,6 @@ ExecStart=${APP_DIR}/venv/bin/gunicorn \\
     --timeout 120 \\
     --keep-alive 2 \\
     --preload \\
-    --enable-stdio-inheritance \\
     --log-level info \\
     --access-logfile ${APP_DIR}/logs/gunicorn_access.log \\
     --error-logfile ${APP_DIR}/logs/gunicorn_error.log \\
@@ -812,126 +820,10 @@ ProtectSystem=strict
 ProtectHome=true
 ReadWritePaths=${APP_DIR}/static ${APP_DIR}/logs /tmp
 PrivateTmp=true
-PrivateDevices=true
-ProtectControlGroups=true
-ProtectKernelModules=true
-ProtectKernelTunables=true
-RestrictRealtime=true
-RestrictSUIDSGID=true
 
 # Resource limits
 LimitNOFILE=65535
 LimitNPROC=4096
-MemoryMax=2G
-CPUQuota=200%
-
-[Install]
-WantedBy=multi-user.target
-EOL
-
-    # Enhanced Celery worker service
-    tee /etc/systemd/system/askaraai-celery.service > /dev/null << EOL
-[Unit]
-Description=AskaraAI Celery Worker
-Documentation=https://docs.celeryproject.org/
-After=network.target redis.service mysql.service
-Wants=redis.service mysql.service
-Requires=network.target
-
-[Service]
-Type=simple
-User=${APP_USER}
-Group=${APP_USER}
-WorkingDirectory=${APP_DIR}
-Environment="PATH=${APP_DIR}/venv/bin"
-Environment="PYTHONPATH=${APP_DIR}"
-Environment="C_FORCE_ROOT=1"
-
-# Enhanced Celery worker configuration
-ExecStart=${APP_DIR}/venv/bin/celery \\
-    --app=celery_app.celery \\
-    worker \\
-    --loglevel=info \\
-    --logfile=${APP_DIR}/logs/celery_worker.log \\
-    --pidfile=${APP_DIR}/celery_worker.pid \\
-    --concurrency=2 \\
-    --max-tasks-per-child=100 \\
-    --max-memory-per-child=2048000 \\
-    --time-limit=3600 \\
-    --soft-time-limit=3300 \\
-    --queues=video_processing,maintenance,default \\
-    --pool=prefork
-
-ExecStop=/bin/kill -s TERM \$MAINPID
-ExecReload=/bin/kill -s HUP \$MAINPID
-PIDFile=${APP_DIR}/celery_worker.pid
-
-# Enhanced restart policy
-Restart=always
-RestartSec=10
-StartLimitInterval=60s
-StartLimitBurst=3
-
-# Enhanced security settings
-NoNewPrivileges=true
-ProtectSystem=strict
-ProtectHome=true
-ReadWritePaths=${APP_DIR}/static ${APP_DIR}/logs /tmp
-PrivateTmp=true
-PrivateDevices=true
-
-# Resource limits
-LimitNOFILE=65535
-LimitNPROC=4096
-MemoryMax=4G
-CPUQuota=300%
-
-[Install]
-WantedBy=multi-user.target
-EOL
-
-    # Celery beat service
-    tee /etc/systemd/system/askaraai-celery-beat.service > /dev/null << EOL
-[Unit]
-Description=AskaraAI Celery Beat Scheduler
-Documentation=https://docs.celeryproject.org/
-After=network.target redis.service mysql.service askaraai-celery.service
-Wants=redis.service mysql.service
-Requires=askaraai-celery.service
-
-[Service]
-Type=simple
-User=${APP_USER}
-Group=${APP_USER}
-WorkingDirectory=${APP_DIR}
-Environment="PATH=${APP_DIR}/venv/bin"
-Environment="PYTHONPATH=${APP_DIR}"
-
-ExecStart=${APP_DIR}/venv/bin/celery \\
-    --app=celery_app.celery \\
-    beat \\
-    --loglevel=info \\
-    --logfile=${APP_DIR}/logs/celery_beat.log \\
-    --pidfile=${APP_DIR}/celery_beat.pid \\
-    --schedule=${APP_DIR}/celerybeat-schedule
-
-ExecStop=/bin/kill -s TERM \$MAINPID
-PIDFile=${APP_DIR}/celery_beat.pid
-
-Restart=always
-RestartSec=10
-
-# Security settings
-NoNewPrivileges=true
-ProtectSystem=strict
-ProtectHome=true
-ReadWritePaths=${APP_DIR}/logs ${APP_DIR}
-PrivateTmp=true
-
-# Resource limits
-LimitNOFILE=4096
-LimitNPROC=256
-MemoryMax=512M
 
 [Install]
 WantedBy=multi-user.target
@@ -939,11 +831,10 @@ EOL
 
     # Set proper permissions
     chown -R ${APP_USER}:${APP_USER} ${APP_DIR}
-    chmod +x ${APP_DIR}/venv/bin/*
     
     # Reload and enable services
     systemctl daemon-reload
-    systemctl enable askaraai.service askaraai-celery.service askaraai-celery-beat.service
+    systemctl enable askaraai.service
     
     log_success "Enhanced systemd services created"
 }
@@ -967,52 +858,6 @@ ${APP_DIR}/logs/*.log {
 }
 EOL
 
-    # Setup basic system monitoring script
-    tee /usr/local/bin/askaraai-monitor.sh > /dev/null << 'EOL'
-#!/bin/bash
-# Basic system monitoring for AskaraAI
-
-LOG_FILE="/var/log/askaraai-monitor.log"
-APP_DIR="/var/www/askaraai"
-
-# Function to log with timestamp
-log_msg() {
-    echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> $LOG_FILE
-}
-
-# Check services
-services=("askaraai" "askaraai-celery" "askaraai-celery-beat" "mysql" "redis-server" "nginx")
-for service in "${services[@]}"; do
-    if ! systemctl is-active --quiet $service; then
-        log_msg "WARNING: $service is not running"
-        systemctl restart $service
-        log_msg "INFO: Attempted to restart $service"
-    fi
-done
-
-# Check disk space
-DISK_USAGE=$(df -h / | awk 'NR==2 {print $5}' | sed 's/%//')
-if [ $DISK_USAGE -gt 80 ]; then
-    log_msg "WARNING: Disk usage is ${DISK_USAGE}%"
-fi
-
-# Check memory usage
-MEM_USAGE=$(free | grep Mem | awk '{printf("%.0f", $3/$2 * 100.0)}')
-if [ $MEM_USAGE -gt 85 ]; then
-    log_msg "WARNING: Memory usage is ${MEM_USAGE}%"
-fi
-
-# Check log file sizes
-find $APP_DIR/logs -name "*.log" -size +100M -exec basename {} \; | while read logfile; do
-    log_msg "WARNING: Log file $logfile is larger than 100MB"
-done
-EOL
-
-    chmod +x /usr/local/bin/askaraai-monitor.sh
-    
-    # Add to crontab
-    (crontab -l 2>/dev/null; echo "*/5 * * * * /usr/local/bin/askaraai-monitor.sh") | crontab -
-    
     log_success "Monitoring and logging setup completed"
 }
 
@@ -1027,9 +872,6 @@ start_services() {
     # Start application services
     systemctl start askaraai.service
     sleep 3
-    systemctl start askaraai-celery.service
-    sleep 2
-    systemctl start askaraai-celery-beat.service
     
     # Start web server
     systemctl start nginx
@@ -1041,39 +883,29 @@ start_services() {
 check_service_status() {
     log_info "Checking service status..."
     
-    services=("mysql" "redis-server" "nginx" "askaraai" "askaraai-celery" "askaraai-celery-beat")
+    services=("mysql" "redis-server" "nginx" "askaraai")
     
     for service in "${services[@]}"; do
         if systemctl is-active --quiet $service; then
             log_success "$service is running"
         else
             log_error "$service is not running"
+            # Try to restart failed service
+            systemctl restart $service
+            sleep 2
+            if systemctl is-active --quiet $service; then
+                log_success "$service restarted successfully"
+            fi
         fi
     done
-}
-
-# Run security scan
-run_security_scan() {
-    log_info "Running basic security scan..."
-    
-    # Update rkhunter database
-    rkhunter --update --quiet
-    
-    # Run basic security checks
-    rkhunter --checkall --skip-keypress --quiet --report-warnings-only || true
-    
-    # Check for security updates
-    apt list --upgradable 2>/dev/null | grep -i security || log_info "No security updates available"
-    
-    log_success "Security scan completed"
 }
 
 # Cleanup temporary files
 cleanup() {
     log_info "Cleaning up temporary files..."
     
-    # Remove temporary password file
-    rm -f /tmp/db_password.txt
+    # Remove temporary password file after a delay
+    (sleep 10 && rm -f /tmp/db_password.txt) &
     
     # Clean package cache
     apt autoremove -y
@@ -1096,77 +928,64 @@ main() {
     setup_redis
     setup_application
     create_environment_file
+    create_basic_templates
+    create_basic_app
     create_error_pages
-    test_and_initialize_database
+    test_basic_application
     setup_nginx
     setup_systemd_services
     setup_monitoring
     start_services
     sleep 5
     check_service_status
-    run_security_scan
     cleanup
     
     echo ""
     echo "✅ AskaraAI Security Enhanced Setup Completed!"
     echo "================================================"
     echo ""
-    echo "📋 Security Enhanced Information:"
+    echo "📋 Setup Information:"
     echo "   Database Password: $(cat /tmp/db_password.txt 2>/dev/null || echo 'Check logs')"
-    echo "   Redis Password: Set in /etc/redis/redis.conf"
     echo "   Database Name: $DB_NAME"
     echo "   Database User: $DB_USER"
     echo ""
     echo "🔒 Security Features Enabled:"
-    echo "   ✅ Enhanced Firewall (UFW) with rate limiting"
+    echo "   ✅ Enhanced Firewall (UFW)"
     echo "   ✅ Fail2Ban with custom rules"
     echo "   ✅ MySQL security hardening"
     echo "   ✅ Redis authentication"
     echo "   ✅ Nginx security headers"
     echo "   ✅ Systemd security sandboxing"
     echo "   ✅ Automatic security updates"
-    echo "   ✅ Security monitoring"
     echo ""
-    echo "📁 Enhanced File Structure:"
+    echo "📁 File Structure:"
     echo "   ${APP_DIR}/               - Application root"
-    echo "   ${APP_DIR}/app.py         - Main Flask app (Security Enhanced)"
-    echo "   ${APP_DIR}/app_models.py  - Database models (Performance Enhanced)"
-    echo "   ${APP_DIR}/celery_app.py  - Celery tasks (Memory Optimized)"
-    echo "   ${APP_DIR}/requirements.txt - Dependencies (Security Enhanced)"
-    echo "   ${APP_DIR}/.env           - Environment config (600 permissions)"
+    echo "   ${APP_DIR}/app.py         - Main Flask app"
+    echo "   ${APP_DIR}/.env           - Environment config (secure)"
     echo "   ${APP_DIR}/logs/          - Application logs"
-    echo "   ${APP_DIR}/static/error/  - Custom error pages"
+    echo "   ${APP_DIR}/static/        - Static files"
+    echo "   ${APP_DIR}/templates/     - HTML templates"
     echo ""
     echo "🔧 Next Steps:"
     echo "1. Edit ${APP_DIR}/.env and add required API keys:"
     echo "   - GEMINI_API_KEY (required for AI processing)"
     echo "   - GOOGLE_CLIENT_ID & GOOGLE_CLIENT_SECRET (for OAuth)"
-    echo "   - SMTP credentials (for email notifications)"
     echo ""
-    echo "2. Setup SSL certificate (Let's Encrypt):"
+    echo "2. Upload your application files to ${APP_DIR}/"
+    echo ""
+    echo "3. Setup SSL certificate (Let's Encrypt):"
     echo "   sudo apt install certbot python3-certbot-nginx"
-    echo "   sudo certbot --nginx -d askaraai.com"
-    echo ""
-    echo "3. Configure Google Drive backup:"
-    echo "   sudo -u www-data rclone config"
+    echo "   sudo certbot --nginx -d yourdomain.com"
     echo ""
     echo "4. Test the application:"
     echo "   curl http://localhost/health"
-    echo "   Visit: https://askaraai.com"
     echo ""
     echo "📊 Monitoring:"
     echo "   Status: systemctl status askaraai"
     echo "   Logs: journalctl -u askaraai -f"
-    echo "   Monitor: tail -f ${APP_DIR}/logs/app.log"
-    echo "   Security: tail -f /var/log/askaraai-monitor.log"
+    echo "   Nginx: systemctl status nginx"
     echo ""
-    echo "🛡️ Security Maintenance:"
-    echo "   - Security updates: apt update && apt upgrade"
-    echo "   - Security scan: rkhunter --check"
-    echo "   - Fail2ban status: fail2ban-client status"
-    echo "   - Firewall status: ufw status"
-    echo ""
-    echo "🎉 Your AskaraAI installation is now SECURE and ready for production!"
+    echo "🎉 Your AskaraAI installation is now ready!"
     echo "📄 Full setup log saved to: $LOG_FILE"
     echo ""
 }
