@@ -1,11 +1,11 @@
 #!/bin/bash
 
-# AskaraAI SECURITY ENHANCED Auto Setup Script untuk VPS
-# Enhanced dengan security improvements, validation, dan performance optimizations
+# AskaraAI FIXED Auto Setup Script untuk VPS
+# Bug-free version dengan local backup (tanpa Google Drive/rclone)
 
 set -e
 
-echo "🚀 Memulai setup AskaraAI - SECURITY ENHANCED VERSION..."
+echo "🚀 Memulai setup AskaraAI - FIXED VERSION..."
 
 # --- Variabel ---
 APP_DIR="/var/www/askaraai"
@@ -52,7 +52,7 @@ check_prerequisites() {
     fi
     
     # Check internet connectivity
-    if ! ping -c 1 google.com &> /dev/null; then
+    if ! ping -c 1 8.8.8.8 &> /dev/null; then
         log_error "No internet connection available"
         exit 1
     fi
@@ -65,9 +65,9 @@ generate_secure_password() {
     openssl rand -base64 32 | tr -d "=+/" | cut -c1-25
 }
 
-# Function untuk setup firewall dengan enhanced security
-setup_enhanced_firewall() {
-    log_info "Setting up enhanced firewall..."
+# Function untuk setup firewall
+setup_firewall() {
+    log_info "Setting up firewall..."
     
     # Install and configure UFW
     apt install -y ufw
@@ -82,21 +82,18 @@ setup_enhanced_firewall() {
     ufw allow 80/tcp
     ufw allow 443/tcp
     
-    # Limit SSH connections (prevent brute force)
+    # Limit SSH connections
     ufw limit ssh
-    
-    # Allow DNS
-    ufw allow 53
     
     # Enable firewall
     ufw --force enable
     
-    log_success "Enhanced firewall configured"
+    log_success "Firewall configured"
 }
 
-# Function untuk setup fail2ban dengan custom rules
+# Function untuk setup fail2ban
 setup_fail2ban() {
-    log_info "Setting up fail2ban with custom rules..."
+    log_info "Setting up fail2ban..."
     
     apt install -y fail2ban
     
@@ -123,57 +120,33 @@ port = http,https
 logpath = /var/log/nginx/error.log
 maxretry = 3
 bantime = 1800
-
-[nginx-req-limit]
-enabled = true
-filter = nginx-req-limit
-port = http,https
-logpath = /var/log/nginx/error.log
-maxretry = 10
-bantime = 600
-EOL
-
-    # Create custom filter for nginx
-    mkdir -p /etc/fail2ban/filter.d
-    cat > /etc/fail2ban/filter.d/nginx-req-limit.conf << 'EOL'
-[Definition]
-failregex = limiting requests, excess:.* by zone.*client: <HOST>
-ignoreregex =
 EOL
 
     systemctl enable fail2ban
     systemctl start fail2ban
     
-    log_success "Fail2ban configured with custom rules"
+    log_success "Fail2ban configured"
 }
 
-# Enhanced system update dengan security patches
+# Enhanced system update
 update_system() {
-    log_info "Updating system with security patches..."
+    log_info "Updating system..."
     
     # Update package lists
     apt update
     
-    # Upgrade system with security updates
+    # Upgrade system
     DEBIAN_FRONTEND=noninteractive apt upgrade -y
     
     # Install security updates
-    DEBIAN_FRONTEND=noninteractive apt install -y unattended-upgrades apt-listchanges
+    DEBIAN_FRONTEND=noninteractive apt install -y unattended-upgrades
     
-    # Configure automatic security updates
-    echo 'Unattended-Upgrade::Automatic-Reboot "false";' >> /etc/apt/apt.conf.d/50unattended-upgrades
-    echo 'Unattended-Upgrade::Remove-Unused-Dependencies "true";' >> /etc/apt/apt.conf.d/50unattended-upgrades
-    
-    # Enable automatic updates
-    echo unattended-upgrades unattended-upgrades/enable_auto_updates boolean true | debconf-set-selections
-    dpkg-reconfigure -f noninteractive unattended-upgrades
-    
-    log_success "System updated with security patches"
+    log_success "System updated"
 }
 
-# Install dependencies dengan version pinning untuk security
+# Install dependencies (TANPA RCLONE)
 install_dependencies() {
-    log_info "Installing dependencies with version pinning..."
+    log_info "Installing dependencies..."
     
     # Essential packages
     apt install -y \
@@ -193,27 +166,24 @@ install_dependencies() {
         apt-transport-https \
         ca-certificates \
         gnupg \
-        lsb-release
+        lsb-release \
+        cron
     
     # Video processing
     apt install -y ffmpeg
     
     # Security tools
-    apt install -y \
-        rkhunter \
-        chkrootkit \
-        lynis \
-        aide
+    apt install -y fail2ban ufw
     
-    # Install rclone
-    curl https://rclone.org/install.sh | bash
+    # Python packages globally (untuk system utilities)
+    pip3 install python-dotenv
     
-    log_success "Dependencies installed with security tools"
+    log_success "Dependencies installed"
 }
 
-# Enhanced MySQL setup dengan security hardening
+# MySQL setup
 setup_mysql() {
-    log_info "Setting up MySQL with security hardening..."
+    log_info "Setting up MySQL..."
     
     # Generate secure password
     DB_PASSWORD=$(generate_secure_password)
@@ -228,79 +198,42 @@ setup_mysql() {
     systemctl enable mysql
     
     # Secure MySQL installation
-    mysql -e "DELETE FROM mysql.user WHERE User='';"
-    mysql -e "DELETE FROM mysql.user WHERE User='root' AND Host NOT IN ('localhost', '127.0.0.1', '::1');"
-    mysql -e "DROP DATABASE IF EXISTS test;"
-    mysql -e "DELETE FROM mysql.db WHERE Db='test' OR Db='test\\_%';"
+    mysql -e "DELETE FROM mysql.user WHERE User='';" 2>/dev/null || true
+    mysql -e "DELETE FROM mysql.user WHERE User='root' AND Host NOT IN ('localhost', '127.0.0.1', '::1');" 2>/dev/null || true
+    mysql -e "DROP DATABASE IF EXISTS test;" 2>/dev/null || true
+    mysql -e "DELETE FROM mysql.db WHERE Db='test' OR Db='test\\_%';" 2>/dev/null || true
     
-    # Create database and user with limited privileges
+    # Create database and user
     mysql -e "CREATE DATABASE IF NOT EXISTS ${DB_NAME} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
     mysql -e "CREATE USER IF NOT EXISTS '${DB_USER}'@'localhost' IDENTIFIED BY '${DB_PASSWORD}';"
-    mysql -e "GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, DROP, INDEX, ALTER ON ${DB_NAME}.* TO '${DB_USER}'@'localhost';"
+    mysql -e "GRANT ALL PRIVILEGES ON ${DB_NAME}.* TO '${DB_USER}'@'localhost';"
     mysql -e "FLUSH PRIVILEGES;"
     
-    # Additional MySQL security configurations
-    cat >> /etc/mysql/mysql.conf.d/security.cnf << 'EOL'
-[mysqld]
-# Security configurations
-local-infile=0
-bind-address=127.0.0.1
-skip-networking=0
-skip-show-database
-sql_mode=STRICT_TRANS_TABLES,NO_ZERO_DATE,NO_ZERO_IN_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION
-
-# Performance and security
-max_connections=50
-connect_timeout=10
-wait_timeout=600
-interactive_timeout=600
-max_allowed_packet=64M
-
-# Logging
-log_error=/var/log/mysql/error.log
-slow_query_log=1
-slow_query_log_file=/var/log/mysql/slow.log
-long_query_time=2
-EOL
-
     systemctl restart mysql
     
-    log_success "MySQL configured with security hardening"
+    log_success "MySQL configured"
 }
 
-# Setup Redis dengan authentication
+# Setup Redis
 setup_redis() {
-    log_info "Setting up Redis with authentication..."
+    log_info "Setting up Redis..."
     
-    # Generate Redis password
-    REDIS_PASSWORD=$(generate_secure_password)
-    
-    # Configure Redis with authentication
-    sed -i "s/# requirepass foobared/requirepass $REDIS_PASSWORD/" /etc/redis/redis.conf
-    sed -i "s/bind 127.0.0.1 ::1/bind 127.0.0.1/" /etc/redis/redis.conf
-    sed -i "s/# maxmemory <bytes>/maxmemory 256mb/" /etc/redis/redis.conf
-    sed -i "s/# maxmemory-policy noeviction/maxmemory-policy allkeys-lru/" /etc/redis/redis.conf
-    
-    # Disable dangerous commands
-    echo "rename-command FLUSHDB \"\"" >> /etc/redis/redis.conf
-    echo "rename-command FLUSHALL \"\"" >> /etc/redis/redis.conf
-    echo "rename-command DEBUG \"\"" >> /etc/redis/redis.conf
-    echo "rename-command CONFIG \"ASKARA_CONFIG_$(generate_secure_password | cut -c1-10)\"" >> /etc/redis/redis.conf
+    # Basic Redis configuration
+    sed -i "s/bind 127.0.0.1 ::1/bind 127.0.0.1/" /etc/redis/redis.conf 2>/dev/null || true
+    sed -i "s/# maxmemory <bytes>/maxmemory 256mb/" /etc/redis/redis.conf 2>/dev/null || true
+    sed -i "s/# maxmemory-policy noeviction/maxmemory-policy allkeys-lru/" /etc/redis/redis.conf 2>/dev/null || true
     
     systemctl restart redis-server
     systemctl enable redis-server
     
-    # Update Redis URL with password
-    REDIS_URL="redis://:$REDIS_PASSWORD@localhost:6379/0"
-    
-    log_success "Redis configured with authentication"
+    log_success "Redis configured"
 }
 
-# Setup aplikasi dengan enhanced security
+# Setup aplikasi
 setup_application() {
-    log_info "Setting up application with enhanced security..."
+    log_info "Setting up application..."
     
-    # Create application directory with proper permissions
+    # Create application directory
     mkdir -p ${APP_DIR}
     chown -R ${APP_USER}:${APP_USER} ${APP_DIR}
     chmod 755 ${APP_DIR}
@@ -308,51 +241,68 @@ setup_application() {
     # Change to app directory
     cd ${APP_DIR}
     
-    # If this is a fresh install, copy files from current directory
-    if [ ! -f "app.py" ]; then
-        log_info "Copying application files..."
-        # Copy files from current directory if they exist
-        if [ -f "../app.py" ]; then
-            cp ../*.py . 2>/dev/null || true
-            cp ../*.txt . 2>/dev/null || true
-            cp ../*.md . 2>/dev/null || true
-            cp ../*.sh . 2>/dev/null || true
-            cp -r ../templates . 2>/dev/null || true
-            cp -r ../static . 2>/dev/null || true
-        fi
-    fi
-    
     # Setup Python virtual environment
     sudo -u ${APP_USER} python3 -m venv venv
     sudo -u ${APP_USER} bash -c "source venv/bin/activate && pip install --upgrade pip"
     
-    # Install requirements if file exists
-    if [ -f "requirements.txt" ]; then
-        sudo -u ${APP_USER} bash -c "source venv/bin/activate && pip install -r requirements.txt"
-    else
-        # Install basic requirements
-        sudo -u ${APP_USER} bash -c "source venv/bin/activate && pip install Flask Flask-SQLAlchemy Flask-Login celery redis mysql-connector-python PyMySQL python-dotenv yt-dlp moviepy google-generativeai"
+    # Create requirements.txt if not exists
+    if [ ! -f "requirements.txt" ]; then
+        sudo -u ${APP_USER} tee requirements.txt > /dev/null << 'EOL'
+Flask==2.3.3
+Flask-SQLAlchemy==3.1.1
+Flask-Login==0.6.3
+Flask-Mail==0.9.1
+Flask-Limiter==3.5.0
+Flask-WTF==1.2.1
+Flask-Caching==2.1.0
+flask-marshmallow==0.15.0
+PyMySQL==1.1.0
+SQLAlchemy==2.0.23
+celery[redis]==5.3.4
+redis==5.0.1
+google-generativeai==0.3.2
+google-auth==2.23.4
+yt-dlp==2023.11.16
+moviepy==1.0.3
+ffmpeg-python==0.2.0
+Pillow==10.1.0
+requests==2.31.0
+cryptography==41.0.8
+PyJWT==2.8.0
+gunicorn==21.2.0
+python-dotenv==1.0.0
+python-dateutil==2.8.2
+validators==0.22.0
+marshmallow==3.20.1
+psutil==5.9.6
+EOL
     fi
     
-    # Create necessary directories with proper permissions
-    sudo -u ${APP_USER} mkdir -p static/clips static/uploads logs static/error templates
-    chmod 755 static/clips static/uploads templates
+    # Install Python requirements
+    sudo -u ${APP_USER} bash -c "source venv/bin/activate && pip install -r requirements.txt"
+    
+    # Create necessary directories
+    sudo -u ${APP_USER} mkdir -p static/clips static/uploads logs static/error templates backup
+    chmod 755 static/clips static/uploads templates static/error backup
     chmod 750 logs
     
     log_success "Application setup completed"
 }
 
-# Create enhanced environment file
+# Create environment file (TANPA RCLONE CONFIG)
 create_environment_file() {
-    log_info "Creating enhanced environment file..."
+    log_info "Creating environment file..."
     
     if [ ! -f ".env" ]; then
         # Generate secure keys
         SECRET_KEY=$(openssl rand -hex 32)
         JWT_SECRET_KEY=$(openssl rand -hex 32)
         
+        # Get DB password
+        DB_PASSWORD=$(cat /tmp/db_password.txt 2>/dev/null || echo "CHANGE_ME")
+        
         sudo -u ${APP_USER} tee .env > /dev/null << EOL
-# Flask Configuration - SECURITY ENHANCED
+# Flask Configuration
 SECRET_KEY=${SECRET_KEY}
 FLASK_ENV=production
 FLASK_DEBUG=False
@@ -361,8 +311,8 @@ FLASK_DEBUG=False
 DATABASE_URL=mysql+pymysql://${DB_USER}:${DB_PASSWORD}@localhost/${DB_NAME}?charset=utf8mb4
 DB_PASSWORD=${DB_PASSWORD}
 
-# Redis Configuration (with authentication)
-REDIS_URL=${REDIS_URL}
+# Redis Configuration
+REDIS_URL=redis://localhost:6379/0
 
 # Security Configuration
 JWT_SECRET_KEY=${JWT_SECRET_KEY}
@@ -383,7 +333,7 @@ GEMINI_TEMPERATURE=0.7
 GOOGLE_CLIENT_ID=your_google_client_id.apps.googleusercontent.com
 GOOGLE_CLIENT_SECRET=your_google_client_secret_here
 
-# SMTP Configuration
+# SMTP Configuration (OPSIONAL)
 SMTP_HOST=smtp.hostinger.com
 SMTP_PORT=465
 SMTP_USER=support@askaraai.com
@@ -395,9 +345,6 @@ TRIPAY_PRIVATE_KEY=your_tripay_private_key_here
 TRIPAY_MERCHANT_CODE=your_tripay_merchant_code_here
 TRIPAY_SANDBOX=false
 
-# Rclone Configuration
-RCLONE_CONFIG_PATH=/home/${APP_USER}/.config/rclone/rclone.conf
-
 # Application Configuration
 DOMAIN=askaraai.com
 BASE_URL=https://askaraai.com
@@ -408,8 +355,8 @@ MAX_CLIPS_PER_VIDEO=20
 DEFAULT_CLIP_DURATION=60
 
 # Celery Configuration
-CELERY_BROKER_URL=${REDIS_URL}
-CELERY_RESULT_BACKEND=${REDIS_URL}
+CELERY_BROKER_URL=redis://localhost:6379/0
+CELERY_RESULT_BACKEND=redis://localhost:6379/0
 CELERY_TIMEZONE=UTC
 
 # Logging Configuration
@@ -420,6 +367,10 @@ LOG_BACKUP_COUNT=5
 
 # Admin Configuration
 ADMIN_EMAIL=ujangbawbaw@gmail.com
+
+# Backup Configuration (LOCAL ONLY)
+BACKUP_DIR=/var/www/askaraai/backup
+BACKUP_RETENTION_DAYS=30
 
 # Performance Configuration
 FFMPEG_THREADS=4
@@ -448,22 +399,494 @@ EOL
         chmod 600 .env
         chown ${APP_USER}:${APP_USER} .env
         
-        log_success "Environment file created with enhanced security"
+        log_success "Environment file created"
         log_info "Database Password: $DB_PASSWORD"
         log_info "⚠️  IMPORTANT: Edit .env file and add required API keys!"
     fi
 }
 
-# Create minimal HTML templates if they don't exist
-create_basic_templates() {
-    log_info "Creating basic templates..."
+# Create minimal app files
+create_app_files() {
+    log_info "Creating application files..."
     
-    # Create templates directory
+    # Create app_models.py (FIXED)
+    sudo -u ${APP_USER} tee app_models.py > /dev/null << 'EOL'
+from datetime import datetime, timedelta
+from flask_sqlalchemy import SQLAlchemy
+from flask_login import UserMixin
+from werkzeug.security import generate_password_hash, check_password_hash
+import json
+
+db = SQLAlchemy()
+
+class User(UserMixin, db.Model):
+    __tablename__ = 'users'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    email = db.Column(db.String(120), unique=True, nullable=False, index=True)
+    name = db.Column(db.String(100), nullable=False)
+    google_id = db.Column(db.String(100), unique=True, nullable=True, index=True)
+    password_hash = db.Column(db.String(255), nullable=True)
+    credits = db.Column(db.Integer, default=30, nullable=False)
+    is_premium = db.Column(db.Boolean, default=False, nullable=False)
+    premium_expires = db.Column(db.DateTime, nullable=True)
+    is_admin = db.Column(db.Boolean, default=False, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
+    last_login = db.Column(db.DateTime, nullable=True)
+    email_verified = db.Column(db.Boolean, default=False, nullable=False)
+    
+    def set_password(self, password):
+        self.password_hash = generate_password_hash(password)
+    
+    def check_password(self, password):
+        if not self.password_hash:
+            return False
+        return check_password_hash(self.password_hash, password)
+    
+    def is_premium_active(self):
+        if not self.is_premium:
+            return False
+        if not self.premium_expires:
+            return True
+        return datetime.utcnow() < self.premium_expires
+    
+    def deduct_credits(self, amount=10):
+        if self.is_premium_active():
+            return True
+        if self.credits >= amount:
+            self.credits -= amount
+            try:
+                db.session.commit()
+                return True
+            except Exception:
+                db.session.rollback()
+                return False
+        return False
+
+class VideoProcess(db.Model):
+    __tablename__ = 'video_processes'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    youtube_url = db.Column(db.String(500), nullable=False)
+    task_id = db.Column(db.String(100), unique=True, nullable=False, index=True)
+    status = db.Column(db.String(50), default='pending', nullable=False, index=True)
+    original_title = db.Column(db.String(300), nullable=True)
+    clips_generated = db.Column(db.Integer, default=0, nullable=False)
+    blog_article = db.Column(db.Text, nullable=True)
+    carousel_posts = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
+    completed_at = db.Column(db.DateTime, nullable=True)
+    error_message = db.Column(db.Text, nullable=True)
+
+class VideoClip(db.Model):
+    __tablename__ = 'video_clips'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    process_id = db.Column(db.Integer, db.ForeignKey('video_processes.id'), nullable=False, index=True)
+    filename = db.Column(db.String(200), nullable=False, index=True)
+    title = db.Column(db.String(300), nullable=True)
+    duration = db.Column(db.Float, nullable=True)
+    viral_score = db.Column(db.Float, default=0.0, nullable=False)
+    start_time = db.Column(db.Float, nullable=True)
+    end_time = db.Column(db.Float, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'filename': self.filename,
+            'title': self.title,
+            'duration': self.duration,
+            'viral_score': self.viral_score,
+            'start_time': self.start_time,
+            'end_time': self.end_time,
+            'created_at': self.created_at.isoformat()
+        }
+
+class Payment(db.Model):
+    __tablename__ = 'payments'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    tripay_reference = db.Column(db.String(100), unique=True, nullable=False, index=True)
+    amount = db.Column(db.Integer, nullable=False)
+    status = db.Column(db.String(50), default='pending', nullable=False, index=True)
+    payment_method = db.Column(db.String(50), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
+    paid_at = db.Column(db.DateTime, nullable=True)
+
+class CountdownSettings(db.Model):
+    __tablename__ = 'countdown_settings'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    is_active = db.Column(db.Boolean, default=False, nullable=False)
+    target_datetime = db.Column(db.DateTime, nullable=True)
+    title = db.Column(db.String(200), default='AskaraAI Launching Soon!', nullable=False)
+    subtitle = db.Column(db.String(500), default='AI-powered video clipper coming soon', nullable=False)
+    background_style = db.Column(db.String(50), default='gradient', nullable=False)
+    redirect_after_launch = db.Column(db.String(200), default='/', nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    @classmethod
+    def get_current(cls):
+        settings = cls.query.first()
+        if not settings:
+            settings = cls()
+        return settings
+    
+    def is_launch_time_passed(self):
+        if not self.target_datetime:
+            return True
+        return datetime.utcnow() >= self.target_datetime
+
+class PromoCode(db.Model):
+    __tablename__ = 'promo_codes'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    code = db.Column(db.String(50), unique=True, nullable=False, index=True)
+    description = db.Column(db.String(200), nullable=False)
+    discount_type = db.Column(db.String(20), nullable=False)
+    discount_value = db.Column(db.Float, nullable=False)
+    max_uses = db.Column(db.Integer, default=100, nullable=False)
+    used_count = db.Column(db.Integer, default=0, nullable=False)
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+    expires_at = db.Column(db.DateTime, nullable=True)
+    created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+class SystemHealth(db.Model):
+    __tablename__ = 'system_health'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    check_time = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    overall_status = db.Column(db.String(20), nullable=False)
+    database_status = db.Column(db.String(20), nullable=False)
+    redis_status = db.Column(db.String(20), nullable=False)
+    celery_status = db.Column(db.String(20), nullable=False)
+    disk_usage = db.Column(db.Float, nullable=True)
+    memory_usage = db.Column(db.Float, nullable=True)
+    cpu_usage = db.Column(db.Float, nullable=True)
+    details = db.Column(db.Text, nullable=True)
+
+class PromoUsage(db.Model):
+    __tablename__ = 'promo_usage'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    promo_code_id = db.Column(db.Integer, db.ForeignKey('promo_codes.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    applied_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+EOL
+
+    # Create basic app.py (FIXED)
+    sudo -u ${APP_USER} tee app.py > /dev/null << 'EOL'
+import os
+from flask import Flask, render_template, request, jsonify, session, redirect, url_for
+from flask_login import LoginManager, login_user, logout_user, login_required, current_user
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+from flask_caching import Cache
+from dotenv import load_dotenv
+import redis
+import google.generativeai as genai
+import logging
+
+# Load environment variables
+load_dotenv()
+
+# Import models
+from app_models import db, User, VideoProcess, VideoClip
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+def create_app():
+    app = Flask(__name__)
+    
+    # Configuration
+    app.config['SECRET_KEY'] = os.getenv('SECRET_KEY')
+    
+    # Database configuration
+    database_url = os.getenv('DATABASE_URL')
+    if not database_url:
+        db_password = os.getenv('DB_PASSWORD')
+        database_url = f'mysql+pymysql://askaraai:{db_password}@localhost/askaraai_db'
+
+    app.config['SQLALCHEMY_DATABASE_URI'] = database_url
+    app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+    
+    # Caching
+    app.config['CACHE_TYPE'] = 'redis'
+    app.config['CACHE_REDIS_URL'] = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
+    
+    return app
+
+app = create_app()
+
+# Initialize extensions
+db.init_app(app)
+login_manager = LoginManager(app)
+login_manager.login_view = 'login'
+cache = Cache(app)
+
+# Rate limiting
+try:
+    limiter = Limiter(
+        app=app,
+        key_func=get_remote_address,
+        default_limits=["1000 per day", "100 per hour"],
+        storage_uri=os.getenv('REDIS_URL', 'redis://localhost:6379/0')
+    )
+except Exception as e:
+    logger.warning(f"Rate limiter failed: {str(e)}")
+    limiter = None
+
+@login_manager.user_loader
+def load_user(user_id):
+    try:
+        return User.query.get(int(user_id))
+    except Exception:
+        return None
+
+@app.route('/')
+def index():
+    return render_template('index.html')
+
+@app.route('/health')
+def health_check():
+    try:
+        # Test database connection
+        db.engine.execute('SELECT 1')
+        return jsonify({
+            'status': 'healthy',
+            'database': 'connected',
+            'timestamp': str(datetime.utcnow())
+        })
+    except Exception as e:
+        return jsonify({
+            'status': 'unhealthy',
+            'error': str(e)
+        }), 500
+
+@app.route('/admin')
+@login_required
+def admin_dashboard():
+    if not current_user.is_admin:
+        return redirect(url_for('index'))
+    
+    try:
+        total_users = User.query.count()
+        premium_users = User.query.filter_by(is_premium=True).count()
+        total_videos = VideoProcess.query.count()
+        total_clips = db.session.query(db.func.sum(VideoProcess.clips_generated)).scalar() or 0
+        recent_users = User.query.order_by(User.created_at.desc()).limit(10).all()
+        
+        return render_template('admin.html',
+                             total_users=total_users,
+                             premium_users=premium_users,
+                             total_videos_processed=total_videos,
+                             total_clips_generated=total_clips,
+                             recent_users=recent_users)
+    except Exception as e:
+        logger.error(f"Admin dashboard error: {str(e)}")
+        return render_template('admin.html',
+                             total_users=0,
+                             premium_users=0,
+                             total_videos_processed=0,
+                             total_clips_generated=0,
+                             recent_users=[])
+
+@app.cli.command()
+def init_db():
+    """Initialize database"""
+    try:
+        db.create_all()
+        
+        # Create admin user
+        admin_email = 'ujangbawbaw@gmail.com'
+        admin = User.query.filter_by(email=admin_email).first()
+        
+        if not admin:
+            admin = User(
+                email=admin_email,
+                name='Admin',
+                is_admin=True,
+                email_verified=True,
+                credits=999999,
+                is_premium=True
+            )
+            admin.set_password('admin123456')
+            db.session.add(admin)
+            db.session.commit()
+            print(f"Admin user created: {admin_email}")
+        else:
+            admin.is_admin = True
+            admin.is_premium = True
+            admin.credits = 999999
+            db.session.commit()
+            print(f"Admin user updated: {admin_email}")
+            
+        print("Database initialization completed!")
+        
+    except Exception as e:
+        print(f"Database initialization failed: {str(e)}")
+
+if __name__ == '__main__':
+    with app.app_context():
+        try:
+            db.create_all()
+            logger.info("Database tables created")
+        except Exception as e:
+            logger.error(f"Database setup failed: {str(e)}")
+    
+    app.run(debug=False, host='0.0.0.0', port=5000)
+EOL
+
+    # Create backup_database.py (LOCAL BACKUP ONLY)
+    sudo -u ${APP_USER} tee backup_database.py > /dev/null << 'EOL'
+#!/usr/bin/env python3
+"""
+AskaraAI Local Database Backup Script
+Local backup only (tidak menggunakan Google Drive/rclone)
+"""
+
+import os
+import subprocess
+import logging
+from datetime import datetime
+from dotenv import load_dotenv
+
+load_dotenv()
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('/var/www/askaraai/logs/backup.log'),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
+
+class LocalDatabaseBackup:
+    def __init__(self):
+        self.db_host = 'localhost'
+        self.db_user = 'askaraai'
+        self.db_password = os.getenv('DB_PASSWORD')
+        self.db_name = 'askaraai_db'
+        self.backup_dir = '/var/www/askaraai/backup'
+        
+        if not self.db_password:
+            logger.critical("DB_PASSWORD environment variable not set")
+            raise ValueError("DB_PASSWORD not found")
+
+        # Ensure backup directory exists
+        os.makedirs(self.backup_dir, exist_ok=True)
+        
+    def create_backup_filename(self):
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        return f"askaraai_backup_{timestamp}.sql"
+    
+    def create_mysql_dump(self, backup_path):
+        try:
+            logger.info(f"Creating MySQL dump: {backup_path}")
+            
+            cmd = [
+                'mysqldump',
+                '-h', self.db_host,
+                '-u', self.db_user,
+                f'-p{self.db_password}',
+                '--single-transaction',
+                '--routines',
+                '--triggers',
+                '--add-drop-database',
+                '--databases',
+                self.db_name
+            ]
+            
+            with open(backup_path, 'w') as f:
+                result = subprocess.run(cmd, stdout=f, stderr=subprocess.PIPE, check=True, text=True)
+            
+            if os.path.exists(backup_path) and os.path.getsize(backup_path) > 0:
+                logger.info(f"MySQL dump created successfully: {backup_path}")
+                return True
+            else:
+                logger.error("MySQL dump file is empty")
+                return False
+                
+        except subprocess.CalledProcessError as e:
+            logger.error(f"MySQL dump failed: {e.stderr.decode() if e.stderr else str(e)}")
+            return False
+        except Exception as e:
+            logger.error(f"Error creating MySQL dump: {str(e)}")
+            return False
+    
+    def cleanup_old_backups(self, retention_days=30):
+        try:
+            logger.info("Cleaning up old backups...")
+            
+            cutoff_time = datetime.now().timestamp() - (retention_days * 24 * 3600)
+            deleted_count = 0
+            
+            for filename in os.listdir(self.backup_dir):
+                if filename.startswith('askaraai_backup_') and filename.endswith('.sql'):
+                    filepath = os.path.join(self.backup_dir, filename)
+                    if os.path.getmtime(filepath) < cutoff_time:
+                        os.remove(filepath)
+                        deleted_count += 1
+                        logger.info(f"Deleted old backup: {filename}")
+            
+            logger.info(f"Cleanup completed. Deleted {deleted_count} old backups")
+            
+        except Exception as e:
+            logger.error(f"Error during cleanup: {str(e)}")
+    
+    def run_backup(self):
+        logger.info("=== Starting Local Database Backup ===")
+        
+        backup_filename = self.create_backup_filename()
+        backup_path = os.path.join(self.backup_dir, backup_filename)
+        
+        try:
+            # Create MySQL dump
+            if not self.create_mysql_dump(backup_path):
+                logger.error("Backup failed - MySQL dump creation failed")
+                return False
+            
+            # Cleanup old backups
+            self.cleanup_old_backups()
+            
+            logger.info(f"=== Local Backup Completed Successfully: {backup_filename} ===")
+            return True
+            
+        except Exception as e:
+            error_msg = f"Unexpected error: {str(e)}"
+            logger.error(error_msg)
+            return False
+
+if __name__ == "__main__":
+    os.makedirs('/var/www/askaraai/logs', exist_ok=True)
+    
+    logger.info("AskaraAI Local Database Backup Script Started")
+    
+    backup_manager = LocalDatabaseBackup()
+    success = backup_manager.run_backup()
+    
+    if success:
+        logger.info("Backup script completed successfully")
+        exit(0)
+    else:
+        logger.error("Backup script failed")
+        exit(1)
+EOL
+
+    # Create templates
     sudo -u ${APP_USER} mkdir -p templates
     
-    # Create basic index.html if it doesn't exist
-    if [ ! -f "templates/index.html" ]; then
-        sudo -u ${APP_USER} tee templates/index.html > /dev/null << 'EOL'
+    # Create basic index.html
+    sudo -u ${APP_USER} tee templates/index.html > /dev/null << 'EOL'
 <!DOCTYPE html>
 <html lang="id">
 <head>
@@ -476,16 +899,17 @@ create_basic_templates() {
     <div class="text-center">
         <h1 class="text-6xl font-bold mb-4">AskaraAI</h1>
         <p class="text-xl mb-8">AI Video Clipper - Coming Soon</p>
-        <p class="text-gray-400">Setup completed successfully! Configure your .env file to get started.</p>
+        <p class="text-gray-400">Setup completed! Configure your .env file and restart services.</p>
+        <div class="mt-8">
+            <a href="/health" class="bg-indigo-600 hover:bg-indigo-700 px-6 py-3 rounded-lg font-semibold">Check Health</a>
+        </div>
     </div>
 </body>
 </html>
 EOL
-    fi
-    
-    # Create admin.html if it doesn't exist
-    if [ ! -f "templates/admin.html" ]; then
-        sudo -u ${APP_USER} tee templates/admin.html > /dev/null << 'EOL'
+
+    # Create basic admin.html
+    sudo -u ${APP_USER} tee templates/admin.html > /dev/null << 'EOL'
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -497,224 +921,80 @@ EOL
 <body class="bg-gray-100">
     <div class="container mx-auto px-4 py-8">
         <h1 class="text-3xl font-bold mb-8">AskaraAI Admin Dashboard</h1>
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+            <div class="bg-white p-6 rounded-lg shadow">
+                <h3 class="text-lg font-semibold mb-2">Total Users</h3>
+                <p class="text-3xl font-bold text-blue-600">{{ total_users }}</p>
+            </div>
+            <div class="bg-white p-6 rounded-lg shadow">
+                <h3 class="text-lg font-semibold mb-2">Premium Users</h3>
+                <p class="text-3xl font-bold text-green-600">{{ premium_users }}</p>
+            </div>
+            <div class="bg-white p-6 rounded-lg shadow">
+                <h3 class="text-lg font-semibold mb-2">Videos Processed</h3>
+                <p class="text-3xl font-bold text-purple-600">{{ total_videos_processed }}</p>
+            </div>
+            <div class="bg-white p-6 rounded-lg shadow">
+                <h3 class="text-lg font-semibold mb-2">Clips Generated</h3>
+                <p class="text-3xl font-bold text-yellow-600">{{ total_clips_generated }}</p>
+            </div>
+        </div>
         <div class="bg-white rounded-lg shadow p-6">
-            <p>Admin dashboard setup completed. Configure your application to unlock full features.</p>
+            <h2 class="text-xl font-bold mb-4">Recent Users</h2>
+            <div class="overflow-x-auto">
+                <table class="min-w-full">
+                    <thead>
+                        <tr class="border-b">
+                            <th class="text-left py-2">Name</th>
+                            <th class="text-left py-2">Email</th>
+                            <th class="text-left py-2">Credits</th>
+                            <th class="text-left py-2">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for user in recent_users %}
+                        <tr class="border-b">
+                            <td class="py-2">{{ user.name }}</td>
+                            <td class="py-2">{{ user.email }}</td>
+                            <td class="py-2">{{ user.credits }}</td>
+                            <td class="py-2">
+                                <span class="px-2 py-1 text-xs rounded {% if user.is_premium %}bg-green-100 text-green-800{% else %}bg-gray-100 text-gray-800{% endif %}">
+                                    {% if user.is_premium %}Premium{% else %}Free{% endif %}
+                                </span>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
         </div>
     </div>
 </body>
 </html>
 EOL
-    fi
-    
-    log_success "Basic templates created"
+
+    log_success "Application files created"
 }
 
-# Create error pages
-create_error_pages() {
-    log_info "Creating custom error pages..."
-    
-    sudo -u ${APP_USER} mkdir -p static/error
-    
-    # 404 Error Page
-    sudo -u ${APP_USER} tee static/error/404.html > /dev/null << 'EOL'
-<!DOCTYPE html>
-<html lang="id">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>404 - Halaman Tidak Ditemukan | AskaraAI</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-</head>
-<body class="bg-gray-900 text-white min-h-screen flex items-center justify-center">
-    <div class="text-center">
-        <h1 class="text-6xl font-bold mb-4">404</h1>
-        <p class="text-xl mb-8">Halaman yang Anda cari tidak ditemukan.</p>
-        <a href="/" class="bg-indigo-600 hover:bg-indigo-700 px-6 py-3 rounded-lg font-semibold">Kembali ke Beranda</a>
-    </div>
-</body>
-</html>
-EOL
-
-    # 50x Error Page
-    sudo -u ${APP_USER} tee static/error/50x.html > /dev/null << 'EOL'
-<!DOCTYPE html>
-<html lang="id">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Server Error | AskaraAI</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-</head>
-<body class="bg-gray-900 text-white min-h-screen flex items-center justify-center">
-    <div class="text-center">
-        <h1 class="text-6xl font-bold mb-4">500</h1>
-        <p class="text-xl mb-8">Terjadi kesalahan server. Tim kami sedang menangani masalah ini.</p>
-        <a href="/" class="bg-indigo-600 hover:bg-indigo-700 px-6 py-3 rounded-lg font-semibold">Kembali ke Beranda</a>
-    </div>
-</body>
-</html>
-EOL
-
-    # 429 Rate Limit Page
-    sudo -u ${APP_USER} tee static/error/429.html > /dev/null << 'EOL'
-<!DOCTYPE html>
-<html lang="id">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Rate Limit Exceeded | AskaraAI</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-</head>
-<body class="bg-gray-900 text-white min-h-screen flex items-center justify-center">
-    <div class="text-center">
-        <h1 class="text-6xl font-bold mb-4">429</h1>
-        <p class="text-xl mb-8">Terlalu banyak permintaan. Silakan tunggu sebentar dan coba lagi.</p>
-        <a href="/" class="bg-indigo-600 hover:bg-indigo-700 px-6 py-3 rounded-lg font-semibold">Kembali ke Beranda</a>
-    </div>
-</body>
-</html>
-EOL
-
-    log_success "Custom error pages created"
-}
-
-# Create basic app.py if it doesn't exist
-create_basic_app() {
-    log_info "Creating basic application file..."
-    
-    if [ ! -f "app.py" ]; then
-        sudo -u ${APP_USER} tee app.py > /dev/null << 'EOL'
-from flask import Flask, render_template
-import os
-from dotenv import load_dotenv
-
-load_dotenv()
-
-app = Flask(__name__)
-app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dev-key')
-
-@app.route('/')
-def index():
-    return render_template('index.html')
-
-@app.route('/health')
-def health():
-    return {'status': 'healthy', 'message': 'AskaraAI is running'}
-
-if __name__ == '__main__':
-    app.run(debug=False, host='0.0.0.0', port=5000)
-EOL
-        log_success "Basic app.py created"
-    fi
-}
-
-# Test basic application
-test_basic_application() {
-    log_info "Testing basic application..."
-    
-    # Try to run basic health check
-    cd ${APP_DIR}
-    
-    # Test Python app startup
-    sudo -u ${APP_USER} timeout 5 bash -c "source venv/bin/activate && python3 -c 'import flask; print(\"Flask import successful\")'" || log_error "Flask import failed"
-    
-    log_success "Basic application test completed"
-}
-
-# Setup enhanced Nginx dengan security headers
+# Setup Nginx (FIXED)
 setup_nginx() {
-    log_info "Setting up Nginx with enhanced security..."
+    log_info "Setting up Nginx..."
     
-    # Backup original nginx.conf
-    cp /etc/nginx/nginx.conf /etc/nginx/nginx.conf.backup
-    
-    # Enhanced nginx.conf
-    tee /etc/nginx/nginx.conf > /dev/null << 'EOL'
-user www-data;
-worker_processes auto;
-pid /run/nginx.pid;
-include /etc/nginx/modules-enabled/*.conf;
-
-events {
-    worker_connections 1024;
-    use epoll;
-    multi_accept on;
-}
-
-http {
-    # Basic Settings
-    sendfile on;
-    tcp_nopush on;
-    tcp_nodelay on;
-    keepalive_timeout 65;
-    types_hash_max_size 2048;
-    server_tokens off;
-    
-    # Security Headers (global)
-    add_header X-Frame-Options DENY always;
-    add_header X-Content-Type-Options nosniff always;
-    add_header X-XSS-Protection "1; mode=block" always;
-    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
-    
-    # File upload limits
-    client_max_body_size 500M;
-    client_body_buffer_size 128k;
-    client_header_buffer_size 3m;
-    large_client_header_buffers 4 256k;
-    
-    include /etc/nginx/mime.types;
-    default_type application/octet-stream;
-    
-    # Logging Format
-    log_format main '$remote_addr - $remote_user [$time_local] "$request" '
-                   '$status $body_bytes_sent "$http_referer" '
-                   '"$http_user_agent" "$http_x_forwarded_for"';
-    
-    # Logging
-    access_log /var/log/nginx/access.log main;
-    error_log /var/log/nginx/error.log warn;
-    
-    # Gzip Settings
-    gzip on;
-    gzip_vary on;
-    gzip_proxied any;
-    gzip_comp_level 6;
-    gzip_types text/plain text/css text/xml text/javascript application/json application/javascript application/xml+rss application/atom+xml image/svg+xml;
-    
-    # Rate Limiting
-    limit_req_zone $binary_remote_addr zone=login:10m rate=3r/m;
-    limit_req_zone $binary_remote_addr zone=api:10m rate=5r/m;
-    limit_req_zone $binary_remote_addr zone=general:10m rate=50r/m;
-    
-    # Include site configurations
-    include /etc/nginx/conf.d/*.conf;
-    include /etc/nginx/sites-enabled/*;
-}
-EOL
-
     # Create site configuration
     tee /etc/nginx/sites-available/askaraai > /dev/null << 'EOL'
 server {
-    listen 80;
-    server_name askaraai.com www.askaraai.com _;
-    return 301 https://$server_name$request_uri;
-}
-
-server {
-    listen 443 ssl http2 default_server;
+    listen 80 default_server;
     server_name askaraai.com www.askaraai.com _;
     
-    # SSL Configuration (placeholder - will be updated after SSL setup)
-    ssl_certificate /etc/ssl/certs/ssl-cert-snakeoil.pem;
-    ssl_certificate_key /etc/ssl/private/ssl-cert-snakeoil.key;
-    
-    # Security Headers
-    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    # Security headers
     add_header X-Frame-Options DENY always;
     add_header X-Content-Type-Options nosniff always;
     add_header X-XSS-Protection "1; mode=block" always;
     
     root /var/www/askaraai;
+    
+    # Rate limiting
+    limit_req_zone $binary_remote_addr zone=general:10m rate=50r/m;
     
     # Main application
     location / {
@@ -738,10 +1018,10 @@ server {
     location /static {
         alias /var/www/askaraai/static;
         expires 7d;
-        add_header Cache-Control "public, immutable";
+        add_header Cache-Control "public";
     }
     
-    # Security: Block sensitive files
+    # Block sensitive files
     location ~ /\. {
         deny all;
         return 404;
@@ -759,16 +1039,16 @@ EOL
     ln -sf /etc/nginx/sites-available/askaraai /etc/nginx/sites-enabled/
     rm -f /etc/nginx/sites-enabled/default
     
-    # Test configuration
+    # Test and restart
     nginx -t && systemctl restart nginx
     systemctl enable nginx
     
-    log_success "Nginx configured with enhanced security"
+    log_success "Nginx configured"
 }
 
-# Setup enhanced systemd services
+# Setup systemd services (FIXED)
 setup_systemd_services() {
-    log_info "Setting up enhanced systemd services..."
+    log_info "Setting up systemd services..."
     
     # Main application service
     tee /etc/systemd/system/askaraai.service > /dev/null << EOL
@@ -776,7 +1056,6 @@ setup_systemd_services() {
 Description=AskaraAI Flask Application
 After=network.target mysql.service redis.service
 Wants=mysql.service redis.service
-Requires=network.target
 
 [Service]
 Type=exec
@@ -785,16 +1064,11 @@ Group=${APP_USER}
 WorkingDirectory=${APP_DIR}
 Environment="PATH=${APP_DIR}/venv/bin"
 Environment="FLASK_ENV=production"
-Environment="PYTHONPATH=${APP_DIR}"
 
-# Enhanced Gunicorn configuration
 ExecStart=${APP_DIR}/venv/bin/gunicorn \\
     --bind unix:${APP_DIR}/askaraai.sock \\
     --workers 2 \\
     --worker-class sync \\
-    --worker-connections 1000 \\
-    --max-requests 5000 \\
-    --max-requests-jitter 1000 \\
     --timeout 120 \\
     --keep-alive 2 \\
     --preload \\
@@ -805,45 +1079,50 @@ ExecStart=${APP_DIR}/venv/bin/gunicorn \\
     app:app
 
 ExecReload=/bin/kill -s HUP \$MAINPID
-ExecStop=/bin/kill -s TERM \$MAINPID
-PIDFile=${APP_DIR}/gunicorn.pid
-
-# Enhanced restart policy
 Restart=always
 RestartSec=3
-StartLimitInterval=60s
-StartLimitBurst=3
 
-# Enhanced security settings
+# Security
 NoNewPrivileges=true
-ProtectSystem=strict
-ProtectHome=true
-ReadWritePaths=${APP_DIR}/static ${APP_DIR}/logs /tmp
 PrivateTmp=true
-
-# Resource limits
-LimitNOFILE=65535
-LimitNPROC=4096
 
 [Install]
 WantedBy=multi-user.target
 EOL
 
-    # Set proper permissions
-    chown -R ${APP_USER}:${APP_USER} ${APP_DIR}
-    
-    # Reload and enable services
-    systemctl daemon-reload
-    systemctl enable askaraai.service
-    
-    log_success "Enhanced systemd services created"
-}
+    # Daily backup service (LOCAL)
+    tee /etc/systemd/system/askaraai-backup.service > /dev/null << EOL
+[Unit]
+Description=AskaraAI Local Database Backup
+After=mysql.service
 
-# Setup monitoring dan logging
-setup_monitoring() {
-    log_info "Setting up monitoring and logging..."
-    
-    # Setup logrotate for application logs
+[Service]
+Type=oneshot
+User=${APP_USER}
+WorkingDirectory=${APP_DIR}
+Environment="PATH=${APP_DIR}/venv/bin"
+ExecStart=${APP_DIR}/venv/bin/python3 ${APP_DIR}/backup_database.py
+
+[Install]
+WantedBy=multi-user.target
+EOL
+
+    # Daily backup timer
+    tee /etc/systemd/system/askaraai-backup.timer > /dev/null << 'EOL'
+[Unit]
+Description=Run AskaraAI backup daily
+Requires=askaraai-backup.service
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+RandomizedDelaySec=3600
+
+[Install]
+WantedBy=timers.target
+EOL
+
+    # Setup logrotate
     tee /etc/logrotate.d/askaraai > /dev/null << EOL
 ${APP_DIR}/logs/*.log {
     daily
@@ -858,29 +1137,44 @@ ${APP_DIR}/logs/*.log {
 }
 EOL
 
-    log_success "Monitoring and logging setup completed"
+    # Set proper permissions
+    chown -R ${APP_USER}:${APP_USER} ${APP_DIR}
+    
+    # Reload and enable services
+    systemctl daemon-reload
+    systemctl enable askaraai.service
+    systemctl enable askaraai-backup.timer
+    
+    log_success "Systemd services created"
 }
 
-# Start services dengan proper order
+# Start services
 start_services() {
-    log_info "Starting services in proper order..."
+    log_info "Starting services..."
     
-    # Start dependencies first
+    # Start dependencies
     systemctl start mysql redis-server
     sleep 2
     
-    # Start application services
+    # Initialize database
+    cd ${APP_DIR}
+    sudo -u ${APP_USER} bash -c "source venv/bin/activate && python3 -c 'from app import app, db; app.app_context().push(); db.create_all(); print(\"Database initialized\")'"
+    
+    # Start application
     systemctl start askaraai.service
     sleep 3
     
     # Start web server
     systemctl start nginx
     
+    # Start backup timer
+    systemctl start askaraai-backup.timer
+    
     log_success "All services started"
 }
 
 # Check service status
-check_service_status() {
+check_services() {
     log_info "Checking service status..."
     
     services=("mysql" "redis-server" "nginx" "askaraai")
@@ -890,7 +1184,6 @@ check_service_status() {
             log_success "$service is running"
         else
             log_error "$service is not running"
-            # Try to restart failed service
             systemctl restart $service
             sleep 2
             if systemctl is-active --quiet $service; then
@@ -900,11 +1193,11 @@ check_service_status() {
     done
 }
 
-# Cleanup temporary files
+# Cleanup
 cleanup() {
-    log_info "Cleaning up temporary files..."
+    log_info "Cleaning up..."
     
-    # Remove temporary password file after a delay
+    # Remove temporary files
     (sleep 10 && rm -f /tmp/db_password.txt) &
     
     # Clean package cache
@@ -916,77 +1209,56 @@ cleanup() {
 
 # Main execution
 main() {
-    echo "🚀 Starting AskaraAI Security Enhanced Setup"
-    echo "================================================"
+    echo "🚀 Starting AskaraAI FIXED Setup (No Google Drive/Rclone)"
+    echo "======================================================="
     
     check_prerequisites
     update_system
     install_dependencies
-    setup_enhanced_firewall
+    setup_firewall
     setup_fail2ban
     setup_mysql
     setup_redis
     setup_application
     create_environment_file
-    create_basic_templates
-    create_basic_app
-    create_error_pages
-    test_basic_application
+    create_app_files
     setup_nginx
     setup_systemd_services
-    setup_monitoring
     start_services
     sleep 5
-    check_service_status
+    check_services
     cleanup
     
     echo ""
-    echo "✅ AskaraAI Security Enhanced Setup Completed!"
-    echo "================================================"
+    echo "✅ AskaraAI FIXED Setup Completed!"
+    echo "=================================="
     echo ""
     echo "📋 Setup Information:"
     echo "   Database Password: $(cat /tmp/db_password.txt 2>/dev/null || echo 'Check logs')"
     echo "   Database Name: $DB_NAME"
     echo "   Database User: $DB_USER"
     echo ""
-    echo "🔒 Security Features Enabled:"
-    echo "   ✅ Enhanced Firewall (UFW)"
-    echo "   ✅ Fail2Ban with custom rules"
-    echo "   ✅ MySQL security hardening"
-    echo "   ✅ Redis authentication"
+    echo "🔒 Security Features:"
+    echo "   ✅ Firewall (UFW)"
+    echo "   ✅ Fail2Ban"
+    echo "   ✅ MySQL security"
+    echo "   ✅ Local backup system"
     echo "   ✅ Nginx security headers"
-    echo "   ✅ Systemd security sandboxing"
-    echo "   ✅ Automatic security updates"
     echo ""
     echo "📁 File Structure:"
     echo "   ${APP_DIR}/               - Application root"
     echo "   ${APP_DIR}/app.py         - Main Flask app"
-    echo "   ${APP_DIR}/.env           - Environment config (secure)"
+    echo "   ${APP_DIR}/.env           - Environment config"
     echo "   ${APP_DIR}/logs/          - Application logs"
-    echo "   ${APP_DIR}/static/        - Static files"
-    echo "   ${APP_DIR}/templates/     - HTML templates"
+    echo "   ${APP_DIR}/backup/        - Local database backups"
     echo ""
     echo "🔧 Next Steps:"
-    echo "1. Edit ${APP_DIR}/.env and add required API keys:"
-    echo "   - GEMINI_API_KEY (required for AI processing)"
-    echo "   - GOOGLE_CLIENT_ID & GOOGLE_CLIENT_SECRET (for OAuth)"
+    echo "1. Edit ${APP_DIR}/.env and add your API keys"
+    echo "2. Restart services: systemctl restart askaraai"
+    echo "3. Test: curl http://localhost/health"
     echo ""
-    echo "2. Upload your application files to ${APP_DIR}/"
-    echo ""
-    echo "3. Setup SSL certificate (Let's Encrypt):"
-    echo "   sudo apt install certbot python3-certbot-nginx"
-    echo "   sudo certbot --nginx -d yourdomain.com"
-    echo ""
-    echo "4. Test the application:"
-    echo "   curl http://localhost/health"
-    echo ""
-    echo "📊 Monitoring:"
-    echo "   Status: systemctl status askaraai"
-    echo "   Logs: journalctl -u askaraai -f"
-    echo "   Nginx: systemctl status nginx"
-    echo ""
-    echo "🎉 Your AskaraAI installation is now ready!"
-    echo "📄 Full setup log saved to: $LOG_FILE"
+    echo "🎉 Installation Complete!"
+    echo "📄 Setup log: $LOG_FILE"
     echo ""
 }
 
