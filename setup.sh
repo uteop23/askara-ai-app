@@ -245,38 +245,39 @@ setup_application() {
     sudo -u ${APP_USER} python3 -m venv venv
     sudo -u ${APP_USER} bash -c "source venv/bin/activate && pip install --upgrade pip"
     
-    # Create requirements.txt if not exists
-    if [ ! -f "requirements.txt" ]; then
-        sudo -u ${APP_USER} tee requirements.txt > /dev/null << 'EOL'
+    # Create requirements.txt with STABLE versions
+    sudo -u ${APP_USER} tee requirements.txt > /dev/null << 'EOL'
+# AskaraAI Requirements - STABLE & TESTED VERSION
 Flask==2.3.3
-Flask-SQLAlchemy==3.1.1
-Flask-Login==0.6.3
+Flask-SQLAlchemy==3.0.5
+Flask-Login==0.6.2
 Flask-Mail==0.9.1
-Flask-Limiter==3.5.0
-Flask-WTF==1.2.1
-Flask-Caching==2.1.0
+Flask-Limiter==3.3.1
+Flask-WTF==1.1.1
+Flask-Caching==2.0.2
 flask-marshmallow==0.15.0
 PyMySQL==1.1.0
-SQLAlchemy==2.0.23
-celery[redis]==5.3.4
-redis==5.0.1
-google-generativeai==0.3.2
-google-auth==2.23.4
-yt-dlp==2023.11.16
+SQLAlchemy==2.0.21
+celery[redis]==5.3.1
+redis==4.6.0
+google-generativeai==0.2.2
+google-auth==2.22.0
+google-auth-oauthlib==1.0.0
+yt-dlp==2023.9.24
 moviepy==1.0.3
 ffmpeg-python==0.2.0
-Pillow==10.1.0
+Pillow==10.0.1
 requests==2.31.0
-cryptography==41.0.8
+cryptography==41.0.4
 PyJWT==2.8.0
 gunicorn==21.2.0
 python-dotenv==1.0.0
 python-dateutil==2.8.2
-validators==0.22.0
+validators==0.20.0
 marshmallow==3.20.1
-psutil==5.9.6
+structlog==23.1.0
+psutil==5.9.5
 EOL
-    fi
     
     # Install Python requirements
     sudo -u ${APP_USER} bash -c "source venv/bin/activate && pip install -r requirements.txt"
@@ -405,11 +406,11 @@ EOL
     fi
 }
 
-# Create minimal app files
+# Create minimal app files - FIXED VERSION
 create_app_files() {
     log_info "Creating application files..."
     
-    # Create app_models.py (FIXED)
+    # Create app_models.py (FIXED dengan import datetime)
     sudo -u ${APP_USER} tee app_models.py > /dev/null << 'EOL'
 from datetime import datetime, timedelta
 from flask_sqlalchemy import SQLAlchemy
@@ -579,9 +580,11 @@ class PromoUsage(db.Model):
     applied_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 EOL
 
-    # Create basic app.py (FIXED)
+    # Create basic app.py (FIXED dengan datetime import)
     sudo -u ${APP_USER} tee app.py > /dev/null << 'EOL'
 import os
+import logging
+from datetime import datetime
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
 from flask_limiter import Limiter
@@ -590,7 +593,6 @@ from flask_caching import Cache
 from dotenv import load_dotenv
 import redis
 import google.generativeai as genai
-import logging
 
 # Load environment variables
 load_dotenv()
@@ -662,7 +664,7 @@ def health_check():
         return jsonify({
             'status': 'healthy',
             'database': 'connected',
-            'timestamp': str(datetime.utcnow())
+            'timestamp': datetime.utcnow().isoformat()
         })
     except Exception as e:
         return jsonify({
@@ -807,7 +809,7 @@ class LocalDatabaseBackup:
             ]
             
             with open(backup_path, 'w') as f:
-                result = subprocess.run(cmd, stdout=f, stderr=subprocess.PIPE, check=True, text=True)
+                result = subprocess.run(cmd, stdout=f, stderr=subprocess.PIPE, check=True, text=True, timeout=600)
             
             if os.path.exists(backup_path) and os.path.getsize(backup_path) > 0:
                 logger.info(f"MySQL dump created successfully: {backup_path}")
@@ -892,16 +894,21 @@ EOL
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AskaraAI - Coming Soon</title>
+    <title>AskaraAI - AI Video Clipper</title>
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-gray-900 text-white min-h-screen flex items-center justify-center">
     <div class="text-center">
         <h1 class="text-6xl font-bold mb-4">AskaraAI</h1>
-        <p class="text-xl mb-8">AI Video Clipper - Coming Soon</p>
-        <p class="text-gray-400">Setup completed! Configure your .env file and restart services.</p>
-        <div class="mt-8">
-            <a href="/health" class="bg-indigo-600 hover:bg-indigo-700 px-6 py-3 rounded-lg font-semibold">Check Health</a>
+        <p class="text-xl mb-8">AI Video Clipper - Setup Completed!</p>
+        <p class="text-gray-400 mb-8">Configure your API keys in .env file and restart services.</p>
+        <div class="mt-8 space-x-4">
+            <a href="/health" class="bg-indigo-600 hover:bg-indigo-700 px-6 py-3 rounded-lg font-semibold">Health Check</a>
+            <a href="/admin" class="bg-green-600 hover:bg-green-700 px-6 py-3 rounded-lg font-semibold">Admin Panel</a>
+        </div>
+        <div class="mt-8 text-sm text-gray-500">
+            <p>Default Admin: ujangbawbaw@gmail.com / admin123456</p>
+            <p>Remember to change admin password!</p>
         </div>
     </div>
 </body>
@@ -1256,6 +1263,14 @@ main() {
     echo "1. Edit ${APP_DIR}/.env and add your API keys"
     echo "2. Restart services: systemctl restart askaraai"
     echo "3. Test: curl http://localhost/health"
+    echo "4. Access admin: http://your-server/admin"
+    echo "   Default admin: ujangbawbaw@gmail.com / admin123456"
+    echo ""
+    echo "⚠️  IMPORTANT SECURITY:"
+    echo "1. Change admin password immediately!"
+    echo "2. Add SSL certificate (Let's Encrypt)"
+    echo "3. Configure API keys in .env file"
+    echo "4. Test backup: systemctl start askaraai-backup"
     echo ""
     echo "🎉 Installation Complete!"
     echo "📄 Setup log: $LOG_FILE"
