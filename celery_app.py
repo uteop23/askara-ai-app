@@ -1,5 +1,5 @@
 # celery_app.py - FIXED VERSION
-# Bug-free Celery app tanpa dependency Google Drive/rclone
+# Bug-free Celery app dengan circular import resolved
 
 import os
 import json
@@ -12,8 +12,7 @@ from celery import Celery
 from dotenv import load_dotenv
 import redis
 import yt_dlp
-import moviepy.editor as mp
-import google.generativeai as genai
+import moviepy.editor as mp  # FIXED: Gunakan API lama yang stabil
 from moviepy.video.fx import resize
 import subprocess
 from pathlib import Path
@@ -81,6 +80,7 @@ celery.conf.update(
 
 # Configure Gemini AI with error handling
 try:
+    import google.generativeai as genai
     gemini_api_key = os.getenv('GEMINI_API_KEY')
     if gemini_api_key and gemini_api_key != 'your_gemini_api_key_here':
         genai.configure(api_key=gemini_api_key)
@@ -126,38 +126,60 @@ class MemoryMonitor:
         gc.collect()
         logger.info("Memory cleanup completed")
 
-# Helper function to get app and models
-def get_app_and_models():
-    """Create app context for database operations"""
-    try:
-        from flask import Flask
-        from flask_sqlalchemy import SQLAlchemy
-        from dotenv import load_dotenv
-        
-        load_dotenv()
-        
-        app = Flask(__name__)
-        
-        # Database configuration
-        database_url = os.getenv('DATABASE_URL')
-        if not database_url:
-            db_password = os.getenv('DB_PASSWORD')
-            if not db_password:
-                raise ValueError("DB_PASSWORD environment variable must be set!")
-            database_url = f'mysql+pymysql://askaraai:{db_password}@localhost/askaraai_db'
+# FIXED: Database context manager untuk avoid circular import
+class DatabaseManager:
+    def __init__(self):
+        self.app = None
+        self.db = None
+        self._models = {}
+    
+    def get_app_context(self):
+        """Create app context for database operations - FIXED circular import"""
+        if self.app is None:
+            try:
+                from flask import Flask
+                from flask_sqlalchemy import SQLAlchemy
+                
+                self.app = Flask(__name__)
+                
+                # Database configuration
+                database_url = os.getenv('DATABASE_URL')
+                if not database_url:
+                    db_password = os.getenv('DB_PASSWORD')
+                    if not db_password:
+                        raise ValueError("DB_PASSWORD environment variable must be set!")
+                    database_url = f'mysql+pymysql://askaraai:{db_password}@localhost/askaraai_db'
 
-        app.config['SQLALCHEMY_DATABASE_URI'] = database_url
-        app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+                self.app.config['SQLALCHEMY_DATABASE_URI'] = database_url
+                self.app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+                self.app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
+                    'pool_recycle': 3600,
+                    'pool_pre_ping': True,
+                    'pool_timeout': 30,
+                    'max_overflow': 10,
+                    'pool_size': 5
+                }
+                
+                self.db = SQLAlchemy(self.app)
+                
+                # Import models only when needed
+                from app_models import User, VideoProcess, VideoClip
+                self._models = {
+                    'User': User,
+                    'VideoProcess': VideoProcess,
+                    'VideoClip': VideoClip
+                }
+                
+                logger.info("✅ Database context created successfully")
+                
+            except Exception as e:
+                logger.error(f"❌ Failed to create app context: {str(e)}")
+                raise
         
-        db = SQLAlchemy(app)
-        
-        # Import models
-        from app_models import User, VideoProcess, VideoClip
-        
-        return app, db, User, VideoProcess, VideoClip
-    except Exception as e:
-        logger.error(f"Failed to create app context: {str(e)}")
-        raise
+        return self.app, self.db, self._models
+
+# Global database manager
+db_manager = DatabaseManager()
 
 class VideoProcessor:
     def __init__(self):
@@ -165,6 +187,7 @@ class VideoProcessor:
         self.memory_monitor = MemoryMonitor()
         try:
             if os.getenv('GEMINI_API_KEY') and os.getenv('GEMINI_API_KEY') != 'your_gemini_api_key_here':
+                import google.generativeai as genai
                 self.gemini_model = genai.GenerativeModel('gemini-pro')
                 logger.info("✅ Gemini model initialized")
             else:
@@ -337,6 +360,7 @@ class VideoProcessor:
             """
             
             try:
+                import google.generativeai as genai
                 response = self.gemini_model.generate_content(
                     prompt,
                     generation_config=genai.types.GenerationConfig(
@@ -456,7 +480,7 @@ class VideoProcessor:
             if not os.path.exists(video_file):
                 raise Exception("Video file not found")
             
-            # Load video
+            # Load video - FIXED: Gunakan API MoviePy 1.0.3
             try:
                 video = mp.VideoFileClip(video_file)
                 logger.info(f"✅ Video loaded: {video.duration}s, {video.fps}fps, {video.size}")
@@ -487,7 +511,7 @@ class VideoProcessor:
                         logger.warning(f"⚠️ Clip {i+1} too short ({end_time - start_time}s), skipping")
                         continue
                     
-                    # Extract clip
+                    # Extract clip - FIXED: Gunakan API MoviePy 1.0.3
                     try:
                         clip = video.subclip(start_time, end_time)
                         logger.info(f"✅ Clip extracted: {end_time - start_time:.1f}s")
@@ -495,7 +519,7 @@ class VideoProcessor:
                         logger.error(f"❌ Failed to extract clip {i+1}: {str(e)}")
                         continue
                     
-                    # Resize to vertical format
+                    # Resize to vertical format - FIXED: Gunakan API lama
                     try:
                         target_height = 1280
                         target_width = 720
@@ -545,7 +569,7 @@ class VideoProcessor:
                             fps=24,
                             verbose=False,
                             logger=None,
-                            temp_audiofile_path=os.path.join(self.temp_dir, f'temp_audio_{i}.m4a'),
+                            temp_audiofile=os.path.join(self.temp_dir, f'temp_audio_{i}.m4a'),
                             preset='fast'
                         )
                         
@@ -595,8 +619,8 @@ class VideoProcessor:
 
 @celery.task(bind=True)
 def process_video_task(self, process_id, youtube_url):
-    """Main task for processing YouTube videos"""
-    app, db, User, VideoProcess, VideoClip = get_app_and_models()
+    """Main task for processing YouTube videos - FIXED circular import"""
+    app, db, models = db_manager.get_app_context()
     
     with app.app_context():
         processor = None
@@ -610,8 +634,12 @@ def process_video_task(self, process_id, youtube_url):
                 meta={'status': 'Initializing video processing...'}
             )
             
-            # Get video process record
+            # Get video process record - FIXED: Use models from context
             try:
+                VideoProcess = models['VideoProcess']
+                User = models['User']
+                VideoClip = models['VideoClip']
+                
                 video_process = VideoProcess.query.get(process_id)
                 if not video_process:
                     raise Exception("Video process record not found")
@@ -751,7 +779,7 @@ def process_video_task(self, process_id, youtube_url):
             
             # Update database with error
             try:
-                video_process = VideoProcess.query.get(process_id)
+                video_process = models['VideoProcess'].query.get(process_id)
                 if video_process:
                     video_process.status = 'failed'
                     video_process.error_message = error_msg
@@ -768,7 +796,7 @@ def process_video_task(self, process_id, youtube_url):
 
 @celery.task
 def local_backup_task():
-    """Local database backup task (tanpa Google Drive)"""
+    """Local database backup task"""
     try:
         logger.info("💾 Starting local database backup...")
         
