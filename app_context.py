@@ -1,6 +1,10 @@
 import os
 from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 # Instance global
 db = SQLAlchemy()
@@ -26,6 +30,13 @@ def create_app_context():
 
         app.config['SQLALCHEMY_DATABASE_URI'] = database_url
         app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+        app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
+            'pool_recycle': 3600,
+            'pool_pre_ping': True,
+            'pool_timeout': 30,
+            'max_overflow': 10,
+            'pool_size': 5
+        }
         
         # Initialize extensions
         db.init_app(app)
