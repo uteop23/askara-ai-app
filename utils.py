@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-AskaraAI Utility Scripts & Helper Functions
+AskaraAI Utility Scripts & Helper Functions - FIXED VERSION
 Collection of utility functions for maintenance, monitoring, and administration
+Tanpa dependency Google Drive/rclone
 """
 
 import os
@@ -40,6 +41,7 @@ class AskaraAIUtils:
         
         try:
             self.redis_client = redis.from_url(os.getenv('REDIS_URL', 'redis://localhost:6379/0'))
+            self.redis_client.ping()
         except Exception as e:
             logger.warning(f"Redis connection failed: {str(e)}")
             self.redis_client = None
@@ -53,7 +55,8 @@ class AskaraAIUtils:
             'disk_space': self._check_disk_space(),
             'nginx': self._check_nginx(),
             'celery': self._check_celery(),
-            'ssl_certificate': self._check_ssl_certificate()
+            'ssl_certificate': self._check_ssl_certificate(),
+            'memory_usage': self._check_memory_usage()
         }
         
         # Determine overall status
@@ -61,7 +64,7 @@ class AskaraAIUtils:
         overall_healthy = True
         
         for service in critical_services:
-            if health_status[service]['status'] != 'healthy':
+            if health_status[service]['status'] not in ['healthy', 'warning']:
                 overall_healthy = False
                 break
         
@@ -88,7 +91,7 @@ class AskaraAIUtils:
                     'message': 'Database connection successful (PyMySQL)'
                 }
             except ImportError:
-                # Fallback to mysql.connector if PyMySQL not available
+                # Fallback to mysql.connector
                 try:
                     import mysql.connector
                     conn = mysql.connector.connect(**self.db_config)
@@ -184,6 +187,43 @@ class AskaraAIUtils:
                 'message': 'Failed to check disk space'
             }
     
+    def _check_memory_usage(self):
+        """Check memory usage"""
+        try:
+            with open('/proc/meminfo', 'r') as f:
+                meminfo = f.read()
+            
+            mem_total = 0
+            mem_available = 0
+            for line in meminfo.split('\n'):
+                if line.startswith('MemTotal:'):
+                    mem_total = int(line.split()[1]) * 1024
+                elif line.startswith('MemAvailable:'):
+                    mem_available = int(line.split()[1]) * 1024
+            
+            if mem_total > 0:
+                usage_percent = ((mem_total - mem_available) / mem_total * 100)
+                status = 'healthy' if usage_percent < 80 else 'warning' if usage_percent < 90 else 'critical'
+                
+                return {
+                    'status': status,
+                    'usage_percent': round(usage_percent, 2),
+                    'total_mb': round(mem_total / 1024 / 1024, 2),
+                    'available_mb': round(mem_available / 1024 / 1024, 2),
+                    'message': f'Memory usage: {usage_percent:.1f}%'
+                }
+            
+            return {
+                'status': 'unknown',
+                'message': 'Could not parse memory usage'
+            }
+        except Exception as e:
+            return {
+                'status': 'unhealthy',
+                'error': str(e),
+                'message': 'Failed to check memory usage'
+            }
+    
     def _check_nginx(self):
         """Check Nginx status"""
         try:
@@ -229,59 +269,51 @@ class AskaraAIUtils:
     def _check_ssl_certificate(self):
         """Check SSL certificate expiration"""
         try:
-            # Try to check SSL certificate
-            result = subprocess.run([
-                'timeout', '10',
-                'openssl', 's_client', '-servername', 'localhost',
-                '-connect', 'localhost:443', '-showcerts'
-            ], input='', capture_output=True, text=True, timeout=15)
-            
-            if result.returncode != 0:
-                # If SSL check fails, check if it's using self-signed cert
+            # Check if using Let's Encrypt certificate
+            cert_path = '/etc/letsencrypt/live/askaraai.com/fullchain.pem'
+            if os.path.exists(cert_path):
                 try:
-                    cert_result = subprocess.run([
-                        'openssl', 'x509', '-in', '/etc/ssl/certs/ssl-cert-snakeoil.pem',
-                        '-noout', '-enddate'
+                    result = subprocess.run([
+                        'openssl', 'x509', '-in', cert_path, '-noout', '-enddate'
                     ], capture_output=True, text=True, timeout=10)
                     
-                    if cert_result.returncode == 0:
-                        return {
-                            'status': 'warning',
-                            'message': 'Using self-signed certificate. Consider setting up Let\'s Encrypt.'
-                        }
-                except:
+                    if result.returncode == 0 and result.stdout:
+                        exp_date_str = result.stdout.replace('notAfter=', '').strip()
+                        try:
+                            exp_date = datetime.strptime(exp_date_str, '%b %d %H:%M:%S %Y %Z')
+                            days_until_expiry = (exp_date - datetime.now()).days
+                            
+                            status = 'healthy' if days_until_expiry > 30 else 'warning' if days_until_expiry > 7 else 'critical'
+                            
+                            return {
+                                'status': status,
+                                'expiry_date': exp_date.isoformat(),
+                                'days_until_expiry': days_until_expiry,
+                                'message': f'SSL certificate expires in {days_until_expiry} days'
+                            }
+                        except:
+                            pass
+                except Exception:
                     pass
+            
+            # Check if using self-signed certificate
+            try:
+                cert_result = subprocess.run([
+                    'openssl', 'x509', '-in', '/etc/ssl/certs/ssl-cert-snakeoil.pem',
+                    '-noout', '-enddate'
+                ], capture_output=True, text=True, timeout=10)
                 
-                return {
-                    'status': 'warning',
-                    'message': 'SSL certificate check failed. May not be configured yet.'
-                }
-            
-            # Parse certificate expiration
-            cert_info = subprocess.run([
-                'openssl', 'x509', '-noout', '-enddate'
-            ], input=result.stdout, capture_output=True, text=True, timeout=10)
-            
-            if cert_info.stdout:
-                exp_date_str = cert_info.stdout.replace('notAfter=', '').strip()
-                try:
-                    exp_date = datetime.strptime(exp_date_str, '%b %d %H:%M:%S %Y %Z')
-                    days_until_expiry = (exp_date - datetime.now()).days
-                    
-                    status = 'healthy' if days_until_expiry > 30 else 'warning' if days_until_expiry > 7 else 'critical'
-                    
+                if cert_result.returncode == 0:
                     return {
-                        'status': status,
-                        'expiry_date': exp_date.isoformat(),
-                        'days_until_expiry': days_until_expiry,
-                        'message': f'SSL certificate expires in {days_until_expiry} days'
+                        'status': 'warning',
+                        'message': 'Using self-signed certificate. Consider setting up Let\'s Encrypt.'
                     }
-                except:
-                    pass
+            except:
+                pass
             
             return {
                 'status': 'warning',
-                'message': 'Could not parse SSL certificate expiration'
+                'message': 'SSL certificate check failed. May not be configured yet.'
             }
             
         except Exception as e:
@@ -301,7 +333,7 @@ class AskaraAIUtils:
             cutoff_date = datetime.now() - timedelta(days=days)
             deleted_files = []
             
-            # Clean up old clips (older than specified days)
+            # Clean up old clips
             if clips_dir.exists():
                 for clip_file in clips_dir.glob('*.mp4'):
                     try:
@@ -321,7 +353,7 @@ class AskaraAIUtils:
                     except Exception as e:
                         logger.warning(f"Failed to delete upload file {upload_file}: {str(e)}")
             
-            # Clean up old log files (keep only recent ones)
+            # Clean up old log files
             if logs_dir.exists():
                 for log_file in logs_dir.glob('*.log.*'):
                     try:
@@ -330,6 +362,15 @@ class AskaraAIUtils:
                             deleted_files.append(str(log_file))
                     except Exception as e:
                         logger.warning(f"Failed to delete log file {log_file}: {str(e)}")
+            
+            # Clean up temporary directories
+            temp_dirs = ['/tmp/askaraai_*']
+            for temp_pattern in temp_dirs:
+                try:
+                    subprocess.run(f"find /tmp -name 'askaraai_*' -type d -mtime +{days} -exec rm -rf {{}} + 2>/dev/null || true", 
+                                 shell=True, timeout=30)
+                except Exception as e:
+                    logger.warning(f"Failed to clean temp directories: {str(e)}")
             
             logger.info(f"Cleaned up {len(deleted_files)} old files")
             return deleted_files
@@ -341,12 +382,8 @@ class AskaraAIUtils:
     def get_system_stats(self):
         """Get comprehensive system statistics"""
         try:
-            # Try to get stats from database
             stats = self._get_database_stats()
-            
-            # Add system stats
             stats.update(self._get_system_performance_stats())
-            
             return stats
             
         except Exception as e:
@@ -362,7 +399,6 @@ class AskaraAIUtils:
     def _get_database_stats(self):
         """Get statistics from database"""
         try:
-            # Try different database connection methods
             conn = None
             cursor = None
             
@@ -376,7 +412,6 @@ class AskaraAIUtils:
                     conn = mysql.connector.connect(**self.db_config)
                     cursor = conn.cursor()
                 except ImportError:
-                    # Return basic stats if no database connection available
                     return {
                         'users': {'total': 0, 'premium': 0, 'new_30d': 0, 'conversion_rate': 0},
                         'videos': {'total': 0, 'completed': 0, 'success_rate': 0},
@@ -388,7 +423,7 @@ class AskaraAIUtils:
             stats = {}
             
             # Check if tables exist first
-            cursor.execute("SHOW TABLES LIKE 'user'")
+            cursor.execute("SHOW TABLES LIKE 'users'")
             if not cursor.fetchone():
                 return {
                     'users': {'total': 0, 'premium': 0, 'new_30d': 0, 'conversion_rate': 0},
@@ -400,13 +435,13 @@ class AskaraAIUtils:
             
             # User statistics
             try:
-                cursor.execute("SELECT COUNT(*) FROM user")
+                cursor.execute("SELECT COUNT(*) FROM users")
                 total_users = cursor.fetchone()[0]
                 
-                cursor.execute("SELECT COUNT(*) FROM user WHERE is_premium = 1")
+                cursor.execute("SELECT COUNT(*) FROM users WHERE is_premium = 1")
                 premium_users = cursor.fetchone()[0]
                 
-                cursor.execute("SELECT COUNT(*) FROM user WHERE created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)")
+                cursor.execute("SELECT COUNT(*) FROM users WHERE created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)")
                 new_users_30d = cursor.fetchone()[0]
                 
                 stats['users'] = {
@@ -421,13 +456,13 @@ class AskaraAIUtils:
             
             # Video processing statistics
             try:
-                cursor.execute("SELECT COUNT(*) FROM video_process")
+                cursor.execute("SELECT COUNT(*) FROM video_processes")
                 total_videos = cursor.fetchone()[0]
                 
-                cursor.execute("SELECT COUNT(*) FROM video_process WHERE status = 'completed'")
+                cursor.execute("SELECT COUNT(*) FROM video_processes WHERE status = 'completed'")
                 completed_videos = cursor.fetchone()[0]
                 
-                cursor.execute("SELECT COALESCE(SUM(clips_generated), 0) FROM video_process")
+                cursor.execute("SELECT COALESCE(SUM(clips_generated), 0) FROM video_processes")
                 total_clips = cursor.fetchone()[0] or 0
                 
                 stats['videos'] = {
@@ -449,7 +484,7 @@ class AskaraAIUtils:
             try:
                 cursor.execute("""
                     SELECT DATE(created_at) as date, COUNT(*) as count 
-                    FROM video_process 
+                    FROM video_processes 
                     WHERE created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
                     GROUP BY DATE(created_at)
                     ORDER BY date
@@ -631,6 +666,28 @@ class AskaraAIUtils:
             logger.error(f"Failed to send Discord notification: {str(e)}")
             return False
 
+    def run_local_backup(self):
+        """Run local database backup"""
+        try:
+            import sys
+            sys.path.append('/var/www/askaraai')
+            from backup_database import LocalDatabaseBackup
+            
+            backup_manager = LocalDatabaseBackup()
+            success = backup_manager.run_backup()
+            
+            return {
+                'success': success,
+                'message': 'Local backup completed' if success else 'Local backup failed'
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to run local backup: {str(e)}")
+            return {
+                'success': False,
+                'error': str(e)
+            }
+
 def main():
     """Main function for command-line usage"""
     if len(sys.argv) < 2:
@@ -639,6 +696,7 @@ def main():
         print("  health - Check system health")
         print("  stats - Get system statistics")
         print("  cleanup - Clean up old files")
+        print("  backup - Run local database backup")
         print("  notify <message> - Send test notification")
         return
     
@@ -663,6 +721,15 @@ def main():
         print(f"Cleaned up {len(deleted_files)} files")
         for file in deleted_files:
             print(f"  - {file}")
+    
+    elif command == 'backup':
+        result = utils.run_local_backup()
+        if result['success']:
+            print(f"✅ {result['message']}")
+        else:
+            print(f"❌ {result.get('message', 'Backup failed')}")
+            if 'error' in result:
+                print(f"Error: {result['error']}")
     
     elif command == 'notify':
         if len(sys.argv) < 3:
