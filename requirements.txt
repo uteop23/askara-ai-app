@@ -1,68 +1,72 @@
-# Flask Framework (pinned versions for security)
+# AskaraAI Requirements - MINIMAL STABLE VERSION
+# Hanya dependencies utama yang benar-benar digunakan dalam kode
+# Sub-dependencies akan ter-install otomatis
+
+# =================================
+# FLASK FRAMEWORK - LTS STABLE
+# =================================
 Flask==2.3.3
-Flask-SQLAlchemy==3.1.1
-Flask-Migrate==4.0.5
-Flask-Login==0.6.3
+Flask-SQLAlchemy==3.0.5
+Flask-Login==0.6.2
 Flask-Mail==0.9.1
-Flask-Limiter==3.5.0
-Flask-CORS==4.0.0
-Flask-WTF==1.2.1
-Flask-Caching==2.1.0
+Flask-Limiter==3.3.1
+Flask-WTF==1.1.1
+Flask-Caching==2.0.2
 flask-marshmallow==0.15.0
 
-# Database
+# =================================
+# DATABASE - STABLE
+# =================================
 PyMySQL==1.1.0
-SQLAlchemy==2.0.23
+SQLAlchemy==2.0.21
 
-# Celery for background tasks
-celery[redis]==5.3.4
-redis==5.0.1
+# =================================
+# CELERY & REDIS - PROVEN STABLE
+# =================================
+celery[redis]==5.3.1
+redis==4.6.0
 
-# Google Services
-google-generativeai==0.3.2
-google-auth==2.23.4
-google-auth-oauthlib==1.1.0
-google-auth-httplib2==0.1.1
+# =================================
+# GOOGLE AI - STABLE VERSION
+# =================================
+google-generativeai==0.2.2
+google-auth==2.22.0
+google-auth-oauthlib==1.0.0
 
-# Video Processing
-yt-dlp==2023.11.16
+# =================================
+# VIDEO PROCESSING - STABLE
+# =================================
+yt-dlp==2023.9.24
 moviepy==1.0.3
 ffmpeg-python==0.2.0
-Pillow==10.1.0
+Pillow==10.0.1
 
-# HTTP Requests
+# =================================
+# HTTP REQUESTS - STABLE
+# =================================
 requests==2.31.0
-httpx==0.25.2
 
-# Security & Authentication  
-cryptography==41.0.8
+# =================================
+# SECURITY - STABLE
+# =================================
+cryptography==41.0.4
 PyJWT==2.8.0
-bcrypt==4.1.2
 
-# Web Server
+# =================================
+# WEB SERVER - PRODUCTION READY
+# =================================
 gunicorn==21.2.0
 
-# Environment & Configuration
+# =================================
+# UTILITIES - CORE ONLY
+# =================================
 python-dotenv==1.0.0
-
-# Utilities
 python-dateutil==2.8.2
-pytz==2023.3.post1
-validators==0.22.0
+validators==0.20.0
 marshmallow==3.20.1
-python-magic==0.4.27
 
-# Monitoring & Logging
-sentry-sdk[flask]==1.38.0
-structlog==23.2.0
-
-# System monitoring
-psutil==5.9.6
-
-# Background job monitoring
-flower==2.0.1
-
-# Testing (optional)
-pytest==7.4.3
-pytest-flask==1.3.0
-pytest-cov==4.1.0
+# =================================
+# MONITORING - STABLE
+# =================================
+structlog==23.1.0
+psutil==5.9.5
