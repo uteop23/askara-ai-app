@@ -12,7 +12,6 @@ import subprocess
 import requests
 from datetime import datetime, timedelta
 from pathlib import Path
-import mysql.connector
 import redis
 from dotenv import load_dotenv
 import smtplib
@@ -38,7 +37,12 @@ class AskaraAIUtils:
             'password': self.db_password,
             'database': 'askaraai_db'
         }
-        self.redis_client = redis.from_url(os.getenv('REDIS_URL', 'redis://localhost:6379/0'))
+        
+        try:
+            self.redis_client = redis.from_url(os.getenv('REDIS_URL', 'redis://localhost:6379/0'))
+        except Exception as e:
+            logger.warning(f"Redis connection failed: {str(e)}")
+            self.redis_client = None
         
     def check_system_health(self):
         """Check overall system health"""
@@ -52,26 +56,70 @@ class AskaraAIUtils:
             'ssl_certificate': self._check_ssl_certificate()
         }
         
-        overall_status = all(health_status[key]['status'] == 'healthy' for key in health_status if key != 'timestamp')
-        health_status['overall'] = 'healthy' if overall_status else 'unhealthy'
+        # Determine overall status
+        critical_services = ['database', 'nginx']
+        overall_healthy = True
+        
+        for service in critical_services:
+            if health_status[service]['status'] != 'healthy':
+                overall_healthy = False
+                break
+        
+        health_status['overall'] = 'healthy' if overall_healthy else 'unhealthy'
         
         return health_status
     
     def _check_database(self):
         """Check MySQL database connectivity"""
         try:
-            conn = mysql.connector.connect(**self.db_config)
-            cursor = conn.cursor()
-            cursor.execute("SELECT COUNT(*) FROM user")
-            user_count = cursor.fetchone()[0]
-            cursor.close()
-            conn.close()
-            
-            return {
-                'status': 'healthy',
-                'user_count': user_count,
-                'message': 'Database connection successful'
-            }
+            # Try using PyMySQL first
+            try:
+                import pymysql
+                conn = pymysql.connect(**self.db_config)
+                cursor = conn.cursor()
+                cursor.execute("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = %s", (self.db_config['database'],))
+                table_count = cursor.fetchone()[0]
+                cursor.close()
+                conn.close()
+                
+                return {
+                    'status': 'healthy',
+                    'table_count': table_count,
+                    'message': 'Database connection successful (PyMySQL)'
+                }
+            except ImportError:
+                # Fallback to mysql.connector if PyMySQL not available
+                try:
+                    import mysql.connector
+                    conn = mysql.connector.connect(**self.db_config)
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = %s", (self.db_config['database'],))
+                    table_count = cursor.fetchone()[0]
+                    cursor.close()
+                    conn.close()
+                    
+                    return {
+                        'status': 'healthy',
+                        'table_count': table_count,
+                        'message': 'Database connection successful (mysql.connector)'
+                    }
+                except ImportError:
+                    # Final fallback using subprocess
+                    result = subprocess.run([
+                        'mysql', '-h', self.db_config['host'], 
+                        '-u', self.db_config['user'], 
+                        f"-p{self.db_config['password']}", 
+                        '-e', 'SELECT 1;'
+                    ], capture_output=True, text=True, timeout=10)
+                    
+                    if result.returncode == 0:
+                        return {
+                            'status': 'healthy',
+                            'message': 'Database connection successful (mysql cli)'
+                        }
+                    else:
+                        raise Exception(f"MySQL CLI error: {result.stderr}")
+                        
         except Exception as e:
             return {
                 'status': 'unhealthy',
@@ -82,6 +130,13 @@ class AskaraAIUtils:
     def _check_redis(self):
         """Check Redis connectivity"""
         try:
+            if not self.redis_client:
+                return {
+                    'status': 'unhealthy',
+                    'error': 'Redis client not initialized',
+                    'message': 'Redis connection failed'
+                }
+                
             self.redis_client.ping()
             info = self.redis_client.info()
             
@@ -101,7 +156,7 @@ class AskaraAIUtils:
     def _check_disk_space(self):
         """Check disk space usage"""
         try:
-            result = subprocess.run(['df', '-h', '/'], capture_output=True, text=True)
+            result = subprocess.run(['df', '-h', '/'], capture_output=True, text=True, timeout=10)
             lines = result.stdout.strip().split('\n')
             if len(lines) >= 2:
                 parts = lines[1].split()
@@ -132,7 +187,7 @@ class AskaraAIUtils:
     def _check_nginx(self):
         """Check Nginx status"""
         try:
-            result = subprocess.run(['systemctl', 'is-active', 'nginx'], capture_output=True, text=True)
+            result = subprocess.run(['systemctl', 'is-active', 'nginx'], capture_output=True, text=True, timeout=10)
             active = result.stdout.strip() == 'active'
             
             return {
@@ -151,69 +206,89 @@ class AskaraAIUtils:
         """Check Celery worker status"""
         try:
             # Check if Celery service is running
-            result = subprocess.run(['systemctl', 'is-active', 'askaraai-celery'], capture_output=True, text=True)
+            result = subprocess.run(['systemctl', 'is-active', 'askaraai-celery'], capture_output=True, text=True, timeout=10)
             active = result.stdout.strip() == 'active'
             
-            # Try to get worker stats
-            worker_stats = {}
-            try:
-                from celery_app import celery
-                inspect = celery.control.inspect()
-                stats = inspect.stats()
-                if stats:
-                    worker_stats = {'workers': len(stats)}
-            except:
-                pass
+            # If service doesn't exist, check if process is running
+            if not active:
+                result = subprocess.run(['pgrep', '-f', 'celery.*worker'], capture_output=True, text=True, timeout=10)
+                active = bool(result.stdout.strip())
             
             return {
-                'status': 'healthy' if active else 'unhealthy',
+                'status': 'healthy' if active else 'warning',
                 'active': active,
-                'worker_stats': worker_stats,
                 'message': 'Celery is active' if active else 'Celery is not active'
             }
         except Exception as e:
             return {
-                'status': 'unhealthy',
+                'status': 'warning',
                 'error': str(e),
-                'message': 'Failed to check Celery status'
+                'message': 'Failed to check Celery status (service may not be configured yet)'
             }
     
     def _check_ssl_certificate(self):
         """Check SSL certificate expiration"""
         try:
+            # Try to check SSL certificate
             result = subprocess.run([
-                'openssl', 's_client', '-servername', 'askaraai.com',
-                '-connect', 'askaraai.com:443', '-showcerts'
-            ], input='', capture_output=True, text=True, timeout=10)
+                'timeout', '10',
+                'openssl', 's_client', '-servername', 'localhost',
+                '-connect', 'localhost:443', '-showcerts'
+            ], input='', capture_output=True, text=True, timeout=15)
+            
+            if result.returncode != 0:
+                # If SSL check fails, check if it's using self-signed cert
+                try:
+                    cert_result = subprocess.run([
+                        'openssl', 'x509', '-in', '/etc/ssl/certs/ssl-cert-snakeoil.pem',
+                        '-noout', '-enddate'
+                    ], capture_output=True, text=True, timeout=10)
+                    
+                    if cert_result.returncode == 0:
+                        return {
+                            'status': 'warning',
+                            'message': 'Using self-signed certificate. Consider setting up Let\'s Encrypt.'
+                        }
+                except:
+                    pass
+                
+                return {
+                    'status': 'warning',
+                    'message': 'SSL certificate check failed. May not be configured yet.'
+                }
             
             # Parse certificate expiration
             cert_info = subprocess.run([
                 'openssl', 'x509', '-noout', '-enddate'
-            ], input=result.stdout, capture_output=True, text=True)
+            ], input=result.stdout, capture_output=True, text=True, timeout=10)
             
             if cert_info.stdout:
                 exp_date_str = cert_info.stdout.replace('notAfter=', '').strip()
-                exp_date = datetime.strptime(exp_date_str, '%b %d %H:%M:%S %Y %Z')
-                days_until_expiry = (exp_date - datetime.now()).days
-                
-                status = 'healthy' if days_until_expiry > 30 else 'warning' if days_until_expiry > 7 else 'critical'
-                
-                return {
-                    'status': status,
-                    'expiry_date': exp_date.isoformat(),
-                    'days_until_expiry': days_until_expiry,
-                    'message': f'SSL certificate expires in {days_until_expiry} days'
-                }
+                try:
+                    exp_date = datetime.strptime(exp_date_str, '%b %d %H:%M:%S %Y %Z')
+                    days_until_expiry = (exp_date - datetime.now()).days
+                    
+                    status = 'healthy' if days_until_expiry > 30 else 'warning' if days_until_expiry > 7 else 'critical'
+                    
+                    return {
+                        'status': status,
+                        'expiry_date': exp_date.isoformat(),
+                        'days_until_expiry': days_until_expiry,
+                        'message': f'SSL certificate expires in {days_until_expiry} days'
+                    }
+                except:
+                    pass
             
             return {
-                'status': 'unknown',
-                'message': 'Could not parse SSL certificate'
+                'status': 'warning',
+                'message': 'Could not parse SSL certificate expiration'
             }
+            
         except Exception as e:
             return {
-                'status': 'unhealthy',
+                'status': 'warning',
                 'error': str(e),
-                'message': 'Failed to check SSL certificate'
+                'message': 'SSL certificate check failed'
             }
     
     def cleanup_old_files(self, days=7):
@@ -227,22 +302,34 @@ class AskaraAIUtils:
             deleted_files = []
             
             # Clean up old clips (older than specified days)
-            for clip_file in clips_dir.glob('*.mp4'):
-                if datetime.fromtimestamp(clip_file.stat().st_mtime) < cutoff_date:
-                    clip_file.unlink()
-                    deleted_files.append(str(clip_file))
+            if clips_dir.exists():
+                for clip_file in clips_dir.glob('*.mp4'):
+                    try:
+                        if datetime.fromtimestamp(clip_file.stat().st_mtime) < cutoff_date:
+                            clip_file.unlink()
+                            deleted_files.append(str(clip_file))
+                    except Exception as e:
+                        logger.warning(f"Failed to delete clip file {clip_file}: {str(e)}")
             
             # Clean up uploads directory
-            for upload_file in uploads_dir.glob('*'):
-                if datetime.fromtimestamp(upload_file.stat().st_mtime) < cutoff_date:
-                    upload_file.unlink()
-                    deleted_files.append(str(upload_file))
+            if uploads_dir.exists():
+                for upload_file in uploads_dir.glob('*'):
+                    try:
+                        if datetime.fromtimestamp(upload_file.stat().st_mtime) < cutoff_date:
+                            upload_file.unlink()
+                            deleted_files.append(str(upload_file))
+                    except Exception as e:
+                        logger.warning(f"Failed to delete upload file {upload_file}: {str(e)}")
             
             # Clean up old log files (keep only recent ones)
-            for log_file in logs_dir.glob('*.log.*'):
-                if datetime.fromtimestamp(log_file.stat().st_mtime) < cutoff_date:
-                    log_file.unlink()
-                    deleted_files.append(str(log_file))
+            if logs_dir.exists():
+                for log_file in logs_dir.glob('*.log.*'):
+                    try:
+                        if datetime.fromtimestamp(log_file.stat().st_mtime) < cutoff_date:
+                            log_file.unlink()
+                            deleted_files.append(str(log_file))
+                    except Exception as e:
+                        logger.warning(f"Failed to delete log file {log_file}: {str(e)}")
             
             logger.info(f"Cleaned up {len(deleted_files)} old files")
             return deleted_files
@@ -254,64 +341,183 @@ class AskaraAIUtils:
     def get_system_stats(self):
         """Get comprehensive system statistics"""
         try:
-            conn = mysql.connector.connect(**self.db_config)
-            cursor = conn.cursor()
+            # Try to get stats from database
+            stats = self._get_database_stats()
+            
+            # Add system stats
+            stats.update(self._get_system_performance_stats())
+            
+            return stats
+            
+        except Exception as e:
+            logger.error(f"Error getting system stats: {str(e)}")
+            return {
+                'error': str(e),
+                'users': {'total': 0, 'premium': 0, 'new_30d': 0, 'conversion_rate': 0},
+                'videos': {'total': 0, 'completed': 0, 'success_rate': 0},
+                'clips': {'total': 0, 'average_per_video': 0},
+                'recent_activity': []
+            }
+    
+    def _get_database_stats(self):
+        """Get statistics from database"""
+        try:
+            # Try different database connection methods
+            conn = None
+            cursor = None
+            
+            try:
+                import pymysql
+                conn = pymysql.connect(**self.db_config)
+                cursor = conn.cursor()
+            except ImportError:
+                try:
+                    import mysql.connector
+                    conn = mysql.connector.connect(**self.db_config)
+                    cursor = conn.cursor()
+                except ImportError:
+                    # Return basic stats if no database connection available
+                    return {
+                        'users': {'total': 0, 'premium': 0, 'new_30d': 0, 'conversion_rate': 0},
+                        'videos': {'total': 0, 'completed': 0, 'success_rate': 0},
+                        'clips': {'total': 0, 'average_per_video': 0},
+                        'recent_activity': [],
+                        'note': 'Database statistics unavailable - no database driver found'
+                    }
+            
+            stats = {}
+            
+            # Check if tables exist first
+            cursor.execute("SHOW TABLES LIKE 'user'")
+            if not cursor.fetchone():
+                return {
+                    'users': {'total': 0, 'premium': 0, 'new_30d': 0, 'conversion_rate': 0},
+                    'videos': {'total': 0, 'completed': 0, 'success_rate': 0},
+                    'clips': {'total': 0, 'average_per_video': 0},
+                    'recent_activity': [],
+                    'note': 'Database tables not found - run database initialization'
+                }
             
             # User statistics
-            cursor.execute("SELECT COUNT(*) FROM user")
-            total_users = cursor.fetchone()[0]
-            
-            cursor.execute("SELECT COUNT(*) FROM user WHERE is_premium = 1")
-            premium_users = cursor.fetchone()[0]
-            
-            cursor.execute("SELECT COUNT(*) FROM user WHERE created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)")
-            new_users_30d = cursor.fetchone()[0]
-            
-            # Video processing statistics
-            cursor.execute("SELECT COUNT(*) FROM video_process")
-            total_videos = cursor.fetchone()[0]
-            
-            cursor.execute("SELECT COUNT(*) FROM video_process WHERE status = 'completed'")
-            completed_videos = cursor.fetchone()[0]
-            
-            cursor.execute("SELECT SUM(clips_generated) FROM video_process")
-            total_clips = cursor.fetchone()[0] or 0
-            
-            # Recent activity
-            cursor.execute("""
-                SELECT DATE(created_at) as date, COUNT(*) as count 
-                FROM video_process 
-                WHERE created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
-                GROUP BY DATE(created_at)
-                ORDER BY date
-            """)
-            recent_activity = cursor.fetchall()
-            
-            cursor.close()
-            conn.close()
-            
-            return {
-                'users': {
+            try:
+                cursor.execute("SELECT COUNT(*) FROM user")
+                total_users = cursor.fetchone()[0]
+                
+                cursor.execute("SELECT COUNT(*) FROM user WHERE is_premium = 1")
+                premium_users = cursor.fetchone()[0]
+                
+                cursor.execute("SELECT COUNT(*) FROM user WHERE created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)")
+                new_users_30d = cursor.fetchone()[0]
+                
+                stats['users'] = {
                     'total': total_users,
                     'premium': premium_users,
                     'new_30d': new_users_30d,
                     'conversion_rate': (premium_users / total_users * 100) if total_users > 0 else 0
-                },
-                'videos': {
+                }
+            except Exception as e:
+                logger.warning(f"Failed to get user stats: {str(e)}")
+                stats['users'] = {'total': 0, 'premium': 0, 'new_30d': 0, 'conversion_rate': 0}
+            
+            # Video processing statistics
+            try:
+                cursor.execute("SELECT COUNT(*) FROM video_process")
+                total_videos = cursor.fetchone()[0]
+                
+                cursor.execute("SELECT COUNT(*) FROM video_process WHERE status = 'completed'")
+                completed_videos = cursor.fetchone()[0]
+                
+                cursor.execute("SELECT COALESCE(SUM(clips_generated), 0) FROM video_process")
+                total_clips = cursor.fetchone()[0] or 0
+                
+                stats['videos'] = {
                     'total': total_videos,
                     'completed': completed_videos,
                     'success_rate': (completed_videos / total_videos * 100) if total_videos > 0 else 0
-                },
-                'clips': {
+                }
+                
+                stats['clips'] = {
                     'total': total_clips,
                     'average_per_video': (total_clips / completed_videos) if completed_videos > 0 else 0
-                },
-                'recent_activity': [{'date': str(date), 'count': count} for date, count in recent_activity]
+                }
+            except Exception as e:
+                logger.warning(f"Failed to get video stats: {str(e)}")
+                stats['videos'] = {'total': 0, 'completed': 0, 'success_rate': 0}
+                stats['clips'] = {'total': 0, 'average_per_video': 0}
+            
+            # Recent activity
+            try:
+                cursor.execute("""
+                    SELECT DATE(created_at) as date, COUNT(*) as count 
+                    FROM video_process 
+                    WHERE created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+                    GROUP BY DATE(created_at)
+                    ORDER BY date
+                """)
+                recent_activity = cursor.fetchall()
+                stats['recent_activity'] = [{'date': str(date), 'count': count} for date, count in recent_activity]
+            except Exception as e:
+                logger.warning(f"Failed to get recent activity: {str(e)}")
+                stats['recent_activity'] = []
+            
+            cursor.close()
+            conn.close()
+            
+            return stats
+            
+        except Exception as e:
+            logger.error(f"Database stats error: {str(e)}")
+            return {
+                'users': {'total': 0, 'premium': 0, 'new_30d': 0, 'conversion_rate': 0},
+                'videos': {'total': 0, 'completed': 0, 'success_rate': 0},
+                'clips': {'total': 0, 'average_per_video': 0},
+                'recent_activity': [],
+                'error': str(e)
+            }
+    
+    def _get_system_performance_stats(self):
+        """Get system performance statistics"""
+        try:
+            # Get system load
+            load_avg = os.getloadavg()
+            
+            # Get memory info
+            try:
+                with open('/proc/meminfo', 'r') as f:
+                    meminfo = f.read()
+                
+                mem_total = 0
+                mem_available = 0
+                for line in meminfo.split('\n'):
+                    if line.startswith('MemTotal:'):
+                        mem_total = int(line.split()[1]) * 1024
+                    elif line.startswith('MemAvailable:'):
+                        mem_available = int(line.split()[1]) * 1024
+                
+                memory_usage = ((mem_total - mem_available) / mem_total * 100) if mem_total > 0 else 0
+                
+            except Exception:
+                memory_usage = 0
+            
+            return {
+                'system_performance': {
+                    'load_average': {
+                        '1min': load_avg[0],
+                        '5min': load_avg[1],
+                        '15min': load_avg[2]
+                    },
+                    'memory_usage_percent': round(memory_usage, 2)
+                }
             }
             
         except Exception as e:
-            logger.error(f"Error getting system stats: {str(e)}")
-            return {}
+            logger.warning(f"Failed to get performance stats: {str(e)}")
+            return {
+                'system_performance': {
+                    'load_average': {'1min': 0, '5min': 0, '15min': 0},
+                    'memory_usage_percent': 0
+                }
+            }
     
     def send_notification(self, subject, message, notification_type='info'):
         """Send notification via email/Slack/Discord"""
@@ -436,7 +642,12 @@ def main():
         print("  notify <message> - Send test notification")
         return
     
-    utils = AskaraAIUtils()
+    try:
+        utils = AskaraAIUtils()
+    except Exception as e:
+        print(f"Error initializing utils: {str(e)}")
+        return
+    
     command = sys.argv[1]
     
     if command == 'health':
