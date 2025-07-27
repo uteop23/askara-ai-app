@@ -1,5 +1,5 @@
-# app_models.py - PERFORMANCE ENHANCED VERSION - Database Models
-# Enhanced dengan indexes, validations, dan performance optimizations
+# app_models.py - FIXED COMPLETE VERSION
+# Enhanced database models dengan semua fitur lengkap
 
 from datetime import datetime, timedelta
 from flask_sqlalchemy import SQLAlchemy
@@ -7,6 +7,7 @@ from flask_login import UserMixin
 from werkzeug.security import generate_password_hash, check_password_hash
 import json
 import validators
+import secrets
 
 # Instance database - akan diinisialisasi di app.py
 db = SQLAlchemy()
@@ -32,6 +33,15 @@ class User(UserMixin, db.Model):
     failed_login_attempts = db.Column(db.Integer, default=0, nullable=False)
     account_locked_until = db.Column(db.DateTime, nullable=True)
     last_password_change = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    
+    # Profile fields
+    avatar_url = db.Column(db.String(500), nullable=True)
+    timezone = db.Column(db.String(50), default='UTC', nullable=False)
+    language = db.Column(db.String(10), default='id', nullable=False)
+    
+    # Preferences
+    email_notifications = db.Column(db.Boolean, default=True, nullable=False)
+    marketing_emails = db.Column(db.Boolean, default=False, nullable=False)
     
     # Relationships
     video_processes = db.relationship('VideoProcess', backref='user', lazy=True, cascade='all, delete-orphan')
@@ -127,6 +137,29 @@ class User(UserMixin, db.Model):
             raise ValueError("Invalid email format")
         return True
     
+    def generate_verification_token(self):
+        """Generate email verification token"""
+        self.verification_token = secrets.token_urlsafe(32)
+        return self.verification_token
+    
+    def verify_email(self, token):
+        """Verify email with token"""
+        if self.verification_token == token:
+            self.email_verified = True
+            self.verification_token = None
+            return True
+        return False
+    
+    def upgrade_to_premium(self, days=30):
+        """Upgrade user to premium"""
+        self.is_premium = True
+        if self.premium_expires and self.premium_expires > datetime.utcnow():
+            # Extend existing premium
+            self.premium_expires += timedelta(days=days)
+        else:
+            # New premium subscription
+            self.premium_expires = datetime.utcnow() + timedelta(days=days)
+    
     def to_dict(self):
         """Convert user to dictionary for JSON responses"""
         return {
@@ -135,8 +168,11 @@ class User(UserMixin, db.Model):
             'name': self.name,
             'credits': self.credits,
             'is_premium': self.is_premium_active(),
+            'is_admin': self.is_admin,
+            'email_verified': self.email_verified,
             'created_at': self.created_at.isoformat(),
-            'last_login': self.last_login.isoformat() if self.last_login else None
+            'last_login': self.last_login.isoformat() if self.last_login else None,
+            'premium_expires': self.premium_expires.isoformat() if self.premium_expires else None
         }
 
 class VideoProcess(db.Model):
@@ -148,6 +184,7 @@ class VideoProcess(db.Model):
     task_id = db.Column(db.String(100), unique=True, nullable=False, index=True)
     status = db.Column(db.String(50), default='pending', nullable=False, index=True)
     original_title = db.Column(db.String(300), nullable=True)
+    original_description = db.Column(db.Text, nullable=True)
     clips_generated = db.Column(db.Integer, default=0, nullable=False)
     blog_article = db.Column(db.Text, nullable=True)
     carousel_posts = db.Column(db.Text, nullable=True)
@@ -159,6 +196,17 @@ class VideoProcess(db.Model):
     processing_time_seconds = db.Column(db.Integer, nullable=True)
     video_duration_seconds = db.Column(db.Integer, nullable=True)
     file_size_mb = db.Column(db.Float, nullable=True)
+    ai_analysis_time = db.Column(db.Integer, nullable=True)
+    
+    # Quality metrics
+    success_rate = db.Column(db.Float, nullable=True)
+    user_rating = db.Column(db.Integer, nullable=True)  # 1-5 stars
+    user_feedback = db.Column(db.Text, nullable=True)
+    
+    # Processing settings
+    target_clip_duration = db.Column(db.Integer, default=60, nullable=False)
+    max_clips = db.Column(db.Integer, default=10, nullable=False)
+    language = db.Column(db.String(10), default='id', nullable=False)
     
     # Relationships
     clips = db.relationship('VideoClip', backref='video_process', lazy=True, cascade='all, delete-orphan')
@@ -205,6 +253,31 @@ class VideoProcess(db.Model):
         }
         return status_colors.get(self.status, 'gray')
     
+    def mark_completed(self):
+        """Mark process as completed"""
+        self.status = 'completed'
+        self.completed_at = datetime.utcnow()
+        self.calculate_processing_time()
+    
+    def mark_failed(self, error_message):
+        """Mark process as failed with error message"""
+        self.status = 'failed'
+        self.error_message = error_message
+        self.completed_at = datetime.utcnow()
+    
+    def get_progress_percentage(self):
+        """Get processing progress percentage"""
+        progress_map = {
+            'pending': 0,
+            'downloading': 20,
+            'processing': 40,
+            'analyzing': 60,
+            'creating_clips': 80,
+            'completed': 100,
+            'failed': 0
+        }
+        return progress_map.get(self.status, 0)
+    
     def to_dict(self):
         """Convert to dictionary with enhanced info"""
         return {
@@ -212,13 +285,15 @@ class VideoProcess(db.Model):
             'task_id': self.task_id,
             'status': self.status,
             'status_color': self.get_status_color(),
+            'progress_percentage': self.get_progress_percentage(),
             'original_title': self.original_title,
             'clips_generated': self.clips_generated,
             'created_at': self.created_at.isoformat(),
             'completed_at': self.completed_at.isoformat() if self.completed_at else None,
             'processing_time_seconds': self.processing_time_seconds,
             'video_duration_seconds': self.video_duration_seconds,
-            'error_message': self.error_message
+            'error_message': self.error_message,
+            'user_rating': self.user_rating
         }
 
 class VideoClip(db.Model):
@@ -228,6 +303,7 @@ class VideoClip(db.Model):
     process_id = db.Column(db.Integer, db.ForeignKey('video_processes.id'), nullable=False, index=True)
     filename = db.Column(db.String(200), nullable=False, index=True)
     title = db.Column(db.String(300), nullable=True)
+    description = db.Column(db.Text, nullable=True)
     duration = db.Column(db.Float, nullable=True)
     viral_score = db.Column(db.Float, default=0.0, nullable=False, index=True)
     start_time = db.Column(db.Float, nullable=True)
@@ -238,12 +314,31 @@ class VideoClip(db.Model):
     file_size_mb = db.Column(db.Float, nullable=True)
     resolution = db.Column(db.String(20), nullable=True)  # e.g., "720x1280"
     download_count = db.Column(db.Integer, default=0, nullable=False)
+    view_count = db.Column(db.Integer, default=0, nullable=False)
+    share_count = db.Column(db.Integer, default=0, nullable=False)
+    
+    # Content analysis
+    detected_objects = db.Column(db.Text, nullable=True)  # JSON array
+    transcription = db.Column(db.Text, nullable=True)
+    keywords = db.Column(db.Text, nullable=True)  # JSON array
+    sentiment_score = db.Column(db.Float, nullable=True)
+    
+    # Social media optimization
+    hashtags = db.Column(db.Text, nullable=True)  # JSON array
+    optimal_posting_time = db.Column(db.String(50), nullable=True)
+    platform_optimized = db.Column(db.String(50), default='universal', nullable=False)
+    
+    # Quality metrics
+    audio_quality = db.Column(db.Float, nullable=True)
+    video_quality = db.Column(db.Float, nullable=True)
+    engagement_prediction = db.Column(db.Float, nullable=True)
     
     # Composite indexes for better query performance
     __table_args__ = (
         db.Index('idx_video_clip_process_viral', 'process_id', 'viral_score'),
         db.Index('idx_video_clip_created_score', 'created_at', 'viral_score'),
         db.Index('idx_video_clip_filename_process', 'filename', 'process_id'),
+        db.Index('idx_video_clip_downloads', 'download_count', 'created_at'),
     )
     
     def validate_duration(self):
@@ -275,6 +370,22 @@ class VideoClip(db.Model):
         except Exception:
             db.session.rollback()
     
+    def increment_view_count(self):
+        """Increment view counter"""
+        self.view_count += 1
+        try:
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+    
+    def increment_share_count(self):
+        """Increment share counter"""
+        self.share_count += 1
+        try:
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+    
     def get_file_path(self):
         """Get full file path"""
         return f"/var/www/askaraai/static/clips/{self.filename}"
@@ -284,12 +395,35 @@ class VideoClip(db.Model):
         import os
         return os.path.exists(self.get_file_path())
     
+    def get_hashtags_list(self):
+        """Get hashtags as list"""
+        try:
+            return json.loads(self.hashtags) if self.hashtags else []
+        except:
+            return []
+    
+    def set_hashtags_list(self, hashtags_list):
+        """Set hashtags from list"""
+        self.hashtags = json.dumps(hashtags_list) if hashtags_list else None
+    
+    def get_keywords_list(self):
+        """Get keywords as list"""
+        try:
+            return json.loads(self.keywords) if self.keywords else []
+        except:
+            return []
+    
+    def set_keywords_list(self, keywords_list):
+        """Set keywords from list"""
+        self.keywords = json.dumps(keywords_list) if keywords_list else None
+    
     def to_dict(self):
         """Convert to dictionary with enhanced info"""
         return {
             'id': self.id,
             'filename': self.filename,
             'title': self.title,
+            'description': self.description,
             'duration': self.duration,
             'viral_score': self.viral_score,
             'start_time': self.start_time,
@@ -297,7 +431,12 @@ class VideoClip(db.Model):
             'file_size_mb': self.file_size_mb,
             'resolution': self.resolution,
             'download_count': self.download_count,
+            'view_count': self.view_count,
+            'share_count': self.share_count,
             'file_exists': self.file_exists(),
+            'hashtags': self.get_hashtags_list(),
+            'keywords': self.get_keywords_list(),
+            'engagement_prediction': self.engagement_prediction,
             'created_at': self.created_at.isoformat()
         }
 
@@ -318,11 +457,20 @@ class Payment(db.Model):
     description = db.Column(db.String(200), nullable=True)
     expires_at = db.Column(db.DateTime, nullable=True)
     
+    # Product information
+    product_type = db.Column(db.String(50), nullable=True)  # 'premium', 'credits', etc.
+    product_details = db.Column(db.Text, nullable=True)  # JSON
+    
+    # Transaction details
+    fee_amount = db.Column(db.Integer, default=0, nullable=False)
+    net_amount = db.Column(db.Integer, nullable=True)
+    
     # Composite indexes
     __table_args__ = (
         db.Index('idx_payment_user_status', 'user_id', 'status'),
         db.Index('idx_payment_status_created', 'status', 'created_at'),
         db.Index('idx_payment_reference_status', 'tripay_reference', 'status'),
+        db.Index('idx_payment_expires', 'expires_at', 'status'),
     )
     
     def is_expired(self):
@@ -336,6 +484,14 @@ class Payment(db.Model):
         self.status = 'paid'
         self.paid_at = datetime.utcnow()
     
+    def mark_as_failed(self):
+        """Mark payment as failed"""
+        self.status = 'failed'
+    
+    def mark_as_expired(self):
+        """Mark payment as expired"""
+        self.status = 'expired'
+    
     def validate_amount(self):
         """Validate payment amount"""
         if self.amount <= 0:
@@ -344,16 +500,36 @@ class Payment(db.Model):
             raise ValueError("Payment amount too large")
         return True
     
+    def calculate_net_amount(self):
+        """Calculate net amount after fees"""
+        self.net_amount = self.amount - self.fee_amount
+        return self.net_amount
+    
+    def get_product_details_dict(self):
+        """Get product details as dictionary"""
+        try:
+            return json.loads(self.product_details) if self.product_details else {}
+        except:
+            return {}
+    
+    def set_product_details_dict(self, details_dict):
+        """Set product details from dictionary"""
+        self.product_details = json.dumps(details_dict) if details_dict else None
+    
     def to_dict(self):
         """Convert to dictionary"""
         return {
             'id': self.id,
             'tripay_reference': self.tripay_reference,
             'amount': self.amount,
+            'net_amount': self.net_amount,
+            'fee_amount': self.fee_amount,
             'currency': self.currency,
             'status': self.status,
             'payment_method': self.payment_method,
             'description': self.description,
+            'product_type': self.product_type,
+            'product_details': self.get_product_details_dict(),
             'created_at': self.created_at.isoformat(),
             'paid_at': self.paid_at.isoformat() if self.paid_at else None,
             'expires_at': self.expires_at.isoformat() if self.expires_at else None,
@@ -372,6 +548,12 @@ class CountdownSettings(db.Model):
     redirect_after_launch = db.Column(db.String(200), default='/', nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Additional settings
+    show_early_access_form = db.Column(db.Boolean, default=True, nullable=False)
+    early_access_message = db.Column(db.String(500), nullable=True)
+    custom_css = db.Column(db.Text, nullable=True)
+    analytics_code = db.Column(db.Text, nullable=True)
     
     @classmethod
     def get_current(cls):
@@ -403,6 +585,22 @@ class CountdownSettings(db.Model):
             self.is_active = False  # Auto-disable if time has passed
         
         return True
+    
+    def to_dict(self):
+        """Convert to dictionary"""
+        return {
+            'id': self.id,
+            'is_active': self.is_active,
+            'target_datetime': self.target_datetime.isoformat() if self.target_datetime else None,
+            'title': self.title,
+            'subtitle': self.subtitle,
+            'background_style': self.background_style,
+            'redirect_after_launch': self.redirect_after_launch,
+            'show_early_access_form': self.show_early_access_form,
+            'early_access_message': self.early_access_message,
+            'time_until_launch': self.time_until_launch(),
+            'is_launch_time_passed': self.is_launch_time_passed()
+        }
 
 class PromoCode(db.Model):
     __tablename__ = 'promo_codes'
@@ -419,6 +617,15 @@ class PromoCode(db.Model):
     created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
     
+    # Enhanced promo features
+    min_purchase_amount = db.Column(db.Integer, default=0, nullable=False)
+    target_user_type = db.Column(db.String(20), default='all', nullable=False)  # all, new, existing
+    usage_limit_per_user = db.Column(db.Integer, default=1, nullable=False)
+    
+    # Analytics
+    total_discount_given = db.Column(db.Float, default=0.0, nullable=False)
+    conversion_rate = db.Column(db.Float, nullable=True)
+    
     # Relationships
     usages = db.relationship('PromoUsage', backref='promo_code', lazy=True)
     
@@ -427,6 +634,7 @@ class PromoCode(db.Model):
         db.Index('idx_promo_code_active_expires', 'is_active', 'expires_at'),
         db.Index('idx_promo_code_type_active', 'discount_type', 'is_active'),
         db.Index('idx_promo_code_usage', 'used_count', 'max_uses'),
+        db.Index('idx_promo_code_target', 'target_user_type', 'is_active'),
     )
     
     def is_valid(self):
@@ -448,14 +656,23 @@ class PromoCode(db.Model):
         if not is_valid:
             return False, message
         
-        # Check if user has already used this promo
-        existing_usage = PromoUsage.query.filter_by(
+        # Check user usage limit
+        user_usage_count = PromoUsage.query.filter_by(
             promo_code_id=self.id,
             user_id=user_id
-        ).first()
+        ).count()
         
-        if existing_usage:
-            return False, "You have already used this promo code"
+        if user_usage_count >= self.usage_limit_per_user:
+            return False, f"You have already used this promo code {self.usage_limit_per_user} time(s)"
+        
+        # Check target user type
+        if self.target_user_type != 'all':
+            user = User.query.get(user_id)
+            if user:
+                if self.target_user_type == 'new' and user.video_processes:
+                    return False, "This promo is only for new users"
+                elif self.target_user_type == 'existing' and not user.video_processes:
+                    return False, "This promo is only for existing users"
         
         return True, "Can be used"
     
@@ -465,32 +682,31 @@ class PromoCode(db.Model):
         if not can_use:
             raise ValueError(message)
         
+        discount_given = 0
+        
         # Apply the discount
         if self.discount_type == 'credits':
             user.add_credits(int(self.discount_value))
+            discount_given = self.discount_value
         elif self.discount_type == 'days':
-            if user.is_premium:
-                if user.premium_expires:
-                    user.premium_expires += timedelta(days=int(self.discount_value))
-                else:
-                    user.premium_expires = datetime.utcnow() + timedelta(days=int(self.discount_value))
-            else:
-                user.is_premium = True
-                user.premium_expires = datetime.utcnow() + timedelta(days=int(self.discount_value))
+            user.upgrade_to_premium(int(self.discount_value))
+            discount_given = self.discount_value
         elif self.discount_type == 'percentage':
             # For percentage discounts, this would typically be applied at payment time
             # This is a placeholder for payment integration
-            pass
+            discount_given = self.discount_value
         
         # Record usage
         usage = PromoUsage(
             promo_code_id=self.id,
-            user_id=user.id
+            user_id=user.id,
+            discount_applied=discount_given
         )
         db.session.add(usage)
         
-        # Increment usage count
+        # Increment usage count and update analytics
         self.used_count += 1
+        self.total_discount_given += discount_given
         
         return True
     
@@ -506,6 +722,17 @@ class PromoCode(db.Model):
             raise ValueError("Invalid discount type")
         
         return True
+    
+    def calculate_conversion_rate(self):
+        """Calculate conversion rate for this promo"""
+        if self.used_count == 0:
+            self.conversion_rate = 0.0
+        else:
+            # This would need more complex logic based on your conversion tracking
+            # For now, just a placeholder
+            self.conversion_rate = (self.used_count / max(self.max_uses, 1)) * 100
+        
+        return self.conversion_rate
     
     def to_dict(self):
         """Convert to dictionary"""
@@ -524,7 +751,11 @@ class PromoCode(db.Model):
             'created_at': self.created_at.isoformat(),
             'is_valid': is_valid,
             'validity_message': validity_message,
-            'usage_percentage': (self.used_count / self.max_uses * 100) if self.max_uses > 0 else 0
+            'usage_percentage': (self.used_count / self.max_uses * 100) if self.max_uses > 0 else 0,
+            'target_user_type': self.target_user_type,
+            'usage_limit_per_user': self.usage_limit_per_user,
+            'total_discount_given': self.total_discount_given,
+            'conversion_rate': self.conversion_rate
         }
 
 class SystemHealth(db.Model):
@@ -540,6 +771,12 @@ class SystemHealth(db.Model):
     memory_usage = db.Column(db.Float, nullable=True)
     cpu_usage = db.Column(db.Float, nullable=True)
     details = db.Column(db.Text, nullable=True)
+    
+    # Additional monitoring
+    active_users = db.Column(db.Integer, nullable=True)
+    processing_queue_size = db.Column(db.Integer, nullable=True)
+    error_rate = db.Column(db.Float, nullable=True)
+    response_time_avg = db.Column(db.Float, nullable=True)
     
     # Composite indexes
     __table_args__ = (
@@ -564,18 +801,33 @@ class SystemHealth(db.Model):
         """Check if system is healthy"""
         return self.overall_status == 'healthy'
     
+    def get_health_score(self):
+        """Calculate overall health score (0-100)"""
+        scores = {
+            'healthy': 100,
+            'warning': 70,
+            'critical': 30,
+            'unhealthy': 0
+        }
+        return scores.get(self.overall_status, 0)
+    
     def to_dict(self):
         """Convert to dictionary"""
         return {
             'id': self.id,
             'check_time': self.check_time.isoformat(),
             'overall_status': self.overall_status,
+            'health_score': self.get_health_score(),
             'database_status': self.database_status,
             'redis_status': self.redis_status,
             'celery_status': self.celery_status,
             'disk_usage': self.disk_usage,
             'memory_usage': self.memory_usage,
             'cpu_usage': self.cpu_usage,
+            'active_users': self.active_users,
+            'processing_queue_size': self.processing_queue_size,
+            'error_rate': self.error_rate,
+            'response_time_avg': self.response_time_avg,
             'details': json.loads(self.details) if self.details else None
         }
 
@@ -586,12 +838,17 @@ class PromoUsage(db.Model):
     promo_code_id = db.Column(db.Integer, db.ForeignKey('promo_codes.id'), nullable=False, index=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
     applied_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
+    discount_applied = db.Column(db.Float, nullable=True)
+    
+    # Additional tracking
+    ip_address = db.Column(db.String(45), nullable=True)
+    user_agent = db.Column(db.String(500), nullable=True)
     
     # Composite indexes
     __table_args__ = (
         db.Index('idx_promo_usage_user_promo', 'user_id', 'promo_code_id'),
         db.Index('idx_promo_usage_promo_time', 'promo_code_id', 'applied_at'),
-        db.UniqueConstraint('user_id', 'promo_code_id', name='uq_user_promo'),  # Prevent duplicate usage
+        db.UniqueConstraint('user_id', 'promo_code_id', name='uq_user_promo_per_code'),  # One use per code per user
     )
     
     def to_dict(self):
@@ -600,5 +857,62 @@ class PromoUsage(db.Model):
             'id': self.id,
             'promo_code_id': self.promo_code_id,
             'user_id': self.user_id,
-            'applied_at': self.applied_at.isoformat()
+            'applied_at': self.applied_at.isoformat(),
+            'discount_applied': self.discount_applied
         }
+
+# Additional models for future features
+
+class UserSession(db.Model):
+    __tablename__ = 'user_sessions'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    session_token = db.Column(db.String(255), unique=True, nullable=False, index=True)
+    ip_address = db.Column(db.String(45), nullable=True)
+    user_agent = db.Column(db.String(500), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    expires_at = db.Column(db.DateTime, nullable=False)
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+    
+    def is_expired(self):
+        return datetime.utcnow() > self.expires_at
+    
+    def deactivate(self):
+        self.is_active = False
+
+class AuditLog(db.Model):
+    __tablename__ = 'audit_logs'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True, index=True)
+    action = db.Column(db.String(100), nullable=False, index=True)
+    resource_type = db.Column(db.String(50), nullable=True)
+    resource_id = db.Column(db.Integer, nullable=True)
+    details = db.Column(db.Text, nullable=True)
+    ip_address = db.Column(db.String(45), nullable=True)
+    user_agent = db.Column(db.String(500), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
+    
+    __table_args__ = (
+        db.Index('idx_audit_log_action_time', 'action', 'created_at'),
+        db.Index('idx_audit_log_user_action', 'user_id', 'action'),
+    )
+    
+    @classmethod
+    def log_action(cls, user_id, action, resource_type=None, resource_id=None, details=None, ip_address=None, user_agent=None):
+        """Log an action to audit trail"""
+        log_entry = cls(
+            user_id=user_id,
+            action=action,
+            resource_type=resource_type,
+            resource_id=resource_id,
+            details=details,
+            ip_address=ip_address,
+            user_agent=user_agent
+        )
+        db.session.add(log_entry)
+        try:
+            db.session.commit()
+        except:
+            db.session.rollback()
