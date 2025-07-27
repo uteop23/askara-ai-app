@@ -1,5 +1,5 @@
-# app.py - FIXED VERSION
-# Bug-free Flask application tanpa dependency Google Drive/rclone
+# app.py - FIXED COMPLETE VERSION
+# All-in-one Flask application dengan semua fitur lengkap
 
 import os
 import logging
@@ -65,6 +65,22 @@ class UserSignupSchema(Schema):
 class UserLoginSchema(Schema):
     email = fields.Email(required=True, validate=validate.Length(max=120))
     password = fields.Str(required=True, validate=validate.Length(min=1, max=128))
+
+class CountdownSettingsSchema(Schema):
+    is_active = fields.Bool(required=True)
+    target_datetime = fields.DateTime(allow_none=True)
+    title = fields.Str(validate=validate.Length(min=1, max=200))
+    subtitle = fields.Str(validate=validate.Length(min=1, max=500))
+    background_style = fields.Str(validate=validate.OneOf(['gradient', 'particles', 'waves']))
+    redirect_after_launch = fields.Str(validate=validate.Length(min=1, max=200))
+
+class PromoCodeCreateSchema(Schema):
+    code = fields.Str(required=True, validate=validate.Length(min=3, max=50))
+    description = fields.Str(required=True, validate=validate.Length(min=5, max=200))
+    discount_type = fields.Str(required=True, validate=validate.OneOf(['percentage', 'days', 'credits']))
+    discount_value = fields.Float(required=True, validate=validate.Range(min=0, max=10000))
+    max_uses = fields.Int(validate=validate.Range(min=1, max=100000), missing=100)
+    expires_at = fields.DateTime(allow_none=True)
 
 # Security constants
 ALLOWED_VIDEO_EXTENSIONS = {'mp4', 'avi', 'mov', 'mkv', 'webm'}
@@ -168,17 +184,21 @@ def load_user(user_id):
         return None
 
 # Security helper functions
-def validate_video_file(file_content):
-    """Validate video file content"""
-    try:
-        # Check file size
-        if len(file_content) > MAX_FILE_SIZE:
-            raise ValueError(f"File too large. Maximum size: {MAX_FILE_SIZE // (1024*1024)}MB")
-        
-        return True
-    except Exception as e:
-        logger.error("File validation failed", error=str(e))
-        raise ValueError(f"File validation failed: {str(e)}")
+def validate_admin_access(require_super_admin=False):
+    """Validate admin access with optional super admin requirement"""
+    if not current_user.is_authenticated:
+        logger.warning("Unauthenticated admin access attempt")
+        return False, "Authentication required"
+    
+    if not current_user.is_admin:
+        logger.warning("Non-admin user attempted admin access", user_email=current_user.email)
+        return False, "Admin access required"
+    
+    if require_super_admin and current_user.email != 'ujangbawbaw@gmail.com':
+        logger.warning("Non-super-admin attempted super admin action", user_email=current_user.email)
+        return False, "Super admin access required"
+    
+    return True, "Access granted"
 
 def monitor_system_resources():
     """Monitor system resources"""
@@ -243,7 +263,7 @@ def launch_page():
 @app.route('/admin')
 @login_required
 def admin_dashboard():
-    """Admin dashboard"""
+    """Admin dashboard with integrated login"""
     if not current_user.is_admin or current_user.email != 'ujangbawbaw@gmail.com':
         logger.warning("Unauthorized admin access attempt", user_email=current_user.email)
         return redirect(url_for('index'))
@@ -259,6 +279,13 @@ def admin_dashboard():
                              total_videos_processed=0,
                              total_clips_generated=0,
                              recent_users=[])
+
+@app.route('/admin/login')
+def admin_login():
+    """Admin login page"""
+    if current_user.is_authenticated and current_user.is_admin:
+        return redirect(url_for('admin_dashboard'))
+    return render_template('admin_login.html')
 
 @cache.cached(timeout=300, key_prefix='admin_stats')
 def get_admin_stats():
@@ -302,7 +329,8 @@ def get_session():
             'email': current_user.email,
             'name': current_user.name,
             'credits': current_user.credits,
-            'is_premium': current_user.is_premium_active()
+            'is_premium': current_user.is_premium_active(),
+            'is_admin': current_user.is_admin
         })
     return jsonify({'error': 'Not authenticated'}), 401
 
@@ -364,7 +392,8 @@ def google_auth():
                         name=name,
                         google_id=google_id,
                         email_verified=True,
-                        credits=30
+                        credits=30,
+                        is_admin=(email == 'ujangbawbaw@gmail.com')
                     )
                     db.session.add(user)
             
@@ -385,7 +414,8 @@ def google_auth():
             'email': user.email,
             'name': user.name,
             'credits': user.credits,
-            'is_premium': user.is_premium_active()
+            'is_premium': user.is_premium_active(),
+            'is_admin': user.is_admin
         })
         
     except Exception as e:
@@ -433,7 +463,8 @@ def login():
             'email': user.email,
             'name': user.name,
             'credits': user.credits,
-            'is_premium': user.is_premium_active()
+            'is_premium': user.is_premium_active(),
+            'is_admin': user.is_admin
         })
         
     except Exception as e:
@@ -474,7 +505,8 @@ def signup_free():
                 email=email,
                 name=name,
                 credits=30,
-                email_verified=False
+                email_verified=False,
+                is_admin=(email == 'ujangbawbaw@gmail.com')
             )
             user.set_password(password)
             
@@ -621,6 +653,300 @@ def get_task_status(task_id):
     except Exception as e:
         logger.error("Task status error", error=str(e))
         return jsonify({'error': 'Failed to get task status'}), 500
+
+# ===== ADMIN API ENDPOINTS =====
+
+@app.route('/api/countdown/settings', methods=['GET'])
+@login_required
+def get_countdown_settings():
+    """Get countdown settings (admin only)"""
+    is_valid, message = validate_admin_access()
+    if not is_valid:
+        return jsonify({'error': message}), 403
+    
+    try:
+        countdown = CountdownSettings.get_current()
+        
+        result = {
+            'is_active': countdown.is_active,
+            'target_datetime': countdown.target_datetime.isoformat() if countdown.target_datetime else None,
+            'title': countdown.title,
+            'subtitle': countdown.subtitle,
+            'background_style': countdown.background_style,
+            'redirect_after_launch': countdown.redirect_after_launch
+        }
+        
+        logger.info("Countdown settings retrieved", user_email=current_user.email)
+        return jsonify(result)
+        
+    except Exception as e:
+        logger.error("Error getting countdown settings", error=str(e), user_email=current_user.email)
+        return jsonify({'error': 'Failed to get countdown settings'}), 500
+
+@app.route('/api/countdown/settings', methods=['POST'])
+@login_required
+def update_countdown_settings():
+    """Update countdown settings (admin only)"""
+    is_valid, message = validate_admin_access()
+    if not is_valid:
+        return jsonify({'error': message}), 403
+    
+    try:
+        # Validate input
+        schema = CountdownSettingsSchema()
+        try:
+            data = schema.load(request.json)
+        except ValidationError as err:
+            logger.warning("Invalid countdown settings input", errors=err.messages, user_email=current_user.email)
+            return jsonify({'error': 'Invalid input', 'details': err.messages}), 400
+        
+        countdown = CountdownSettings.get_current()
+        
+        if not countdown.id:
+            db.session.add(countdown)
+        
+        # Update fields
+        countdown.is_active = data.get('is_active', countdown.is_active)
+        countdown.title = data.get('title', countdown.title)
+        countdown.subtitle = data.get('subtitle', countdown.subtitle)
+        countdown.background_style = data.get('background_style', countdown.background_style)
+        countdown.redirect_after_launch = data.get('redirect_after_launch', countdown.redirect_after_launch)
+        
+        if data.get('target_datetime'):
+            countdown.target_datetime = data['target_datetime']
+        
+        countdown.updated_at = datetime.utcnow()
+        
+        db.session.commit()
+        
+        logger.info("Countdown settings updated", user_email=current_user.email, is_active=countdown.is_active)
+        
+        return jsonify({'success': True, 'message': 'Countdown settings updated'})
+        
+    except Exception as e:
+        db.session.rollback()
+        logger.error("Error updating countdown", error=str(e), user_email=current_user.email)
+        return jsonify({'error': 'Failed to update countdown settings'}), 500
+
+@app.route('/api/promo/codes', methods=['GET'])
+@login_required
+def get_promo_codes():
+    """Get all promo codes (admin only)"""
+    is_valid, message = validate_admin_access()
+    if not is_valid:
+        return jsonify({'error': message}), 403
+    
+    try:
+        # Pagination
+        page = request.args.get('page', 1, type=int)
+        per_page = min(request.args.get('per_page', 20, type=int), 100)  # Max 100 per page
+        
+        codes_query = PromoCode.query.order_by(PromoCode.created_at.desc())
+        codes_paginated = codes_query.paginate(page=page, per_page=per_page, error_out=False)
+        
+        codes_data = []
+        for code in codes_paginated.items:
+            code_dict = {
+                'id': code.id,
+                'code': code.code,
+                'description': code.description,
+                'discount_type': code.discount_type,
+                'discount_value': code.discount_value,
+                'max_uses': code.max_uses,
+                'used_count': code.used_count,
+                'is_active': code.is_active,
+                'expires_at': code.expires_at.isoformat() if code.expires_at else None,
+                'created_at': code.created_at.isoformat(),
+                'usage_percentage': (code.used_count / code.max_uses * 100) if code.max_uses > 0 else 0
+            }
+            codes_data.append(code_dict)
+        
+        result = {
+            'codes': codes_data,
+            'pagination': {
+                'page': page,
+                'per_page': per_page,
+                'total': codes_paginated.total,
+                'pages': codes_paginated.pages,
+                'has_next': codes_paginated.has_next,
+                'has_prev': codes_paginated.has_prev
+            }
+        }
+        
+        logger.info("Promo codes retrieved", user_email=current_user.email, count=len(codes_data))
+        return jsonify(result)
+        
+    except Exception as e:
+        logger.error("Error getting promo codes", error=str(e), user_email=current_user.email)
+        return jsonify({'error': 'Failed to get promo codes'}), 500
+
+@app.route('/api/promo/codes', methods=['POST'])
+@login_required
+def create_promo_code():
+    """Create new promo code (admin only)"""
+    is_valid, message = validate_admin_access()
+    if not is_valid:
+        return jsonify({'error': message}), 403
+    
+    try:
+        # Validate input
+        schema = PromoCodeCreateSchema()
+        try:
+            data = schema.load(request.json)
+        except ValidationError as err:
+            logger.warning("Invalid promo code input", errors=err.messages, user_email=current_user.email)
+            return jsonify({'error': 'Invalid input', 'details': err.messages}), 400
+        
+        # Normalize code to uppercase
+        code_value = data['code'].upper().strip()
+        
+        # Check if code already exists
+        existing = PromoCode.query.filter_by(code=code_value).first()
+        if existing:
+            return jsonify({'error': 'Promo code already exists'}), 400
+        
+        # Create promo code
+        promo_code = PromoCode(
+            code=code_value,
+            description=data['description'].strip(),
+            discount_type=data['discount_type'],
+            discount_value=float(data['discount_value']),
+            max_uses=int(data.get('max_uses', 100)),
+            created_by=current_user.id
+        )
+        
+        if data.get('expires_at'):
+            promo_code.expires_at = data['expires_at']
+        
+        db.session.add(promo_code)
+        db.session.commit()
+        
+        logger.info("Promo code created", 
+                   user_email=current_user.email, 
+                   code=code_value, 
+                   discount_type=data['discount_type'])
+        
+        return jsonify({
+            'success': True, 
+            'message': 'Promo code created successfully'
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        logger.error("Error creating promo code", error=str(e), user_email=current_user.email)
+        return jsonify({'error': 'Failed to create promo code'}), 500
+
+@app.route('/api/promo/codes/<int:code_id>', methods=['DELETE'])
+@login_required
+def delete_promo_code(code_id):
+    """Delete promo code (admin only)"""
+    is_valid, message = validate_admin_access()
+    if not is_valid:
+        return jsonify({'error': message}), 403
+    
+    try:
+        promo_code = PromoCode.query.get(code_id)
+        if not promo_code:
+            return jsonify({'error': 'Promo code not found'}), 404
+        
+        code_value = promo_code.code
+        
+        # Check if promo code has been used
+        if promo_code.used_count > 0:
+            # Instead of deleting, just deactivate
+            promo_code.is_active = False
+            db.session.commit()
+            
+            logger.info("Promo code deactivated", 
+                       user_email=current_user.email, 
+                       code=code_value, 
+                       used_count=promo_code.used_count)
+            
+            return jsonify({
+                'success': True, 
+                'message': 'Promo code deactivated (had usage history)'
+            })
+        else:
+            # Safe to delete if never used
+            db.session.delete(promo_code)
+            db.session.commit()
+            
+            logger.info("Promo code deleted", 
+                       user_email=current_user.email, 
+                       code=code_value)
+            
+            return jsonify({
+                'success': True, 
+                'message': 'Promo code deleted successfully'
+            })
+        
+    except Exception as e:
+        db.session.rollback()
+        logger.error("Error deleting promo code", error=str(e), user_email=current_user.email)
+        return jsonify({'error': 'Failed to delete promo code'}), 500
+
+@app.route('/api/system/health', methods=['GET'])
+@login_required
+def get_system_health():
+    """Get system health status (admin only)"""
+    is_valid, message = validate_admin_access()
+    if not is_valid:
+        return jsonify({'error': message}), 403
+    
+    try:
+        from utils import AskaraAIUtils
+        
+        utils = AskaraAIUtils()
+        health_data = utils.check_system_health()
+        
+        # Save health check to database
+        try:
+            health_record = SystemHealth(
+                overall_status=health_data.get('overall', 'unknown'),
+                database_status=health_data.get('database', {}).get('status', 'unknown'),
+                redis_status=health_data.get('redis', {}).get('status', 'unknown'),
+                celery_status=health_data.get('celery', {}).get('status', 'unknown'),
+                disk_usage=health_data.get('disk_space', {}).get('usage_percent'),
+                memory_usage=health_data.get('memory_usage', {}).get('usage_percent'),
+                cpu_usage=health_data.get('cpu_usage'),
+                details=json.dumps(health_data)
+            )
+            
+            db.session.add(health_record)
+            db.session.commit()
+            
+        except Exception as e:
+            logger.error("Failed to save health record", error=str(e))
+        
+        logger.info("System health checked", user_email=current_user.email, status=health_data.get('overall'))
+        
+        return jsonify(health_data)
+        
+    except Exception as e:
+        logger.error("Error checking system health", error=str(e), user_email=current_user.email)
+        return jsonify({'error': 'Failed to check system health'}), 500
+
+@app.route('/api/system/stats', methods=['GET'])
+@login_required
+def get_system_stats():
+    """Get system statistics (admin only)"""
+    is_valid, message = validate_admin_access()
+    if not is_valid:
+        return jsonify({'error': message}), 403
+    
+    try:
+        from utils import AskaraAIUtils
+        
+        utils = AskaraAIUtils()
+        stats = utils.get_system_stats()
+        
+        logger.info("System stats retrieved", user_email=current_user.email)
+        
+        return jsonify(stats)
+        
+    except Exception as e:
+        logger.error("Error getting system stats", error=str(e), user_email=current_user.email)
+        return jsonify({'error': 'Failed to get system stats'}), 500
 
 # Static file serving
 @app.route('/clips/<filename>')
