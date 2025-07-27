@@ -25,7 +25,6 @@ from werkzeug.security import generate_password_hash, check_password_hash
 import structlog
 import psutil
 from flask_wtf.csrf import CSRFProtect, CSRFError
-from app_extensions import register_extensions
 
 # Load environment variables
 load_dotenv()
@@ -134,6 +133,7 @@ def create_app():
 
 # Create app instance
 app = create_app()
+
 @app.context_processor
 def inject_csrf_token():
     return dict(csrf_token=csrf.generate_csrf)
@@ -708,6 +708,16 @@ def serve_upload(filename):
         logger.error("Error serving upload", filename=filename, error=str(e))
         return jsonify({'error': 'File not found'}), 404
 
+# Register extension blueprint after app is created
+def register_extensions():
+    """Register extension routes"""
+    try:
+        from app_extensions import extensions_bp
+        app.register_blueprint(extensions_bp)
+        logger.info("✅ Extension routes registered")
+    except Exception as e:
+        logger.error(f"❌ Failed to register extensions: {str(e)}")
+
 # ===== ERROR HANDLERS =====
 @app.errorhandler(404)
 def not_found(error):
@@ -820,6 +830,9 @@ if __name__ == '__main__':
             # Create directories
             create_directories()
             logger.info("✅ Directories created")
+            
+            # Register extensions
+            register_extensions()
             
         except Exception as e:
             logger.error(f"❌ Startup check failed: {str(e)}")
