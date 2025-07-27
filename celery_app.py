@@ -129,12 +129,18 @@ class MemoryMonitor:
         gc.collect()
         logger.info("Memory cleanup completed")
 
-# ===== HELPER FUNCTION TO GET DB AND MODELS =====
+# ===== HELPER FUNCTION TO GET APP AND MODELS =====
 def get_app_and_models():
     """Lazy import untuk menghindari circular import"""
     try:
-        from app import app
-        from app_models import db, User, VideoProcess, VideoClip
+        # Create minimal app context for database operations
+        from app_context import create_app_context, get_models
+        app = create_app_context()
+        User, VideoProcess, VideoClip, Payment, CountdownSettings, PromoCode, SystemHealth, PromoUsage = get_models()
+        
+        # Import db from app_models directly
+        from app_models import db
+        
         return app, db, User, VideoProcess, VideoClip
     except Exception as e:
         logger.error(f"Failed to import app and models: {str(e)}")
